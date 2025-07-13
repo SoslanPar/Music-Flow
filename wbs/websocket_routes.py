@@ -150,29 +150,29 @@ class WebSocketRoutes:
             return  # Просто ответ на запрос времени
 
         if msg_type == "play":
-            await self.manager.update_room_state(room_id, {
-                "status_track": True,
-                "time_moment": data.get("position", 0)
-            })
+            # await self.manager.update_room_state(room_id, {
+            #     "status_track": True,
+            #     "time_moment": data.get("position", 0)
+            # })
             await self.manager.broadcast(room_id, {
                 "type": "play",
                 "position": data.get("position", 0)
             }, exclude_user=user_id)
 
         elif msg_type == "pause":
-            await self.manager.update_room_state(room_id, {
-                "status_track": False,
-                "time_moment": data.get("position", 0)
-            })
+            # await self.manager.update_room_state(room_id, {
+            #     "status_track": False,
+            #     "time_moment": data.get("position", 0)
+            # })
             await self.manager.broadcast(room_id, {
                 "type": "pause",
                 "position": data.get("position", 0)
             }, exclude_user=user_id)
 
         elif msg_type == "seek":
-            await self.manager.update_room_state(room_id, {
-                "time_moment": data.get("position", 0)
-            })
+            # await self.manager.update_room_state(room_id, {
+            #     "time_moment": data.get("position", 0)
+            # })
             await self.manager.broadcast(room_id, {
                 "type": "seek",
                 "position": data.get("position", 0)
@@ -216,8 +216,8 @@ class WebSocketRoutes:
                     })
         elif msg_type == "next_track":
             current_time = time.time()
-            if hasattr(self, 'last_track_change') and current_time - self.last_track_change < 4.0:
-                return
+            # if hasattr(self, 'last_track_change') and current_time - self.last_track_change < 4.0:
+            #     return
             self.last_track_change = current_time
             room_state = await self.manager.get_room_state(room_id)
             new_index = (room_state['index_track'] + 1) % len(room_state['list_track'])
