@@ -86,7 +86,23 @@ class UserServices:
     async def add_room(self, room_id: str, user_id: str):
         async with self.db.session_factory() as session:
             result = await session.execute(select(Users).where(Users.id == user_id))
-            print(type(result))
+            user = result.scalar_one_or_none()
+            if user:
+                rooms = list(user.rooms_list) if user.rooms_list else []
+                if room_id not in rooms:
+                    rooms.append(room_id)
+                    user.rooms_list = rooms
+                    await session.commit()
+            return user
+    
+    async def get_user_rooms(self, user_id: str) -> list:
+        """Получить список комнат пользователя"""
+        async with self.db.session_factory() as session:
+            result = await session.execute(select(Users).where(Users.id == user_id))
+            user = result.scalar_one_or_none()
+            if user and user.rooms_list:
+                return list(user.rooms_list)
+            return []
     
     async def get_yandex_token_by_user_id(self, user_id: str):
         async with self.db.session_factory() as session:

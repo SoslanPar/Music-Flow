@@ -1,20 +1,31 @@
 <template>
   <div class="volume-control">
-    <VolumeIcon :volume="volume" @update:volume="$emit('update:volume', $event)" />
-    <input
-      type="range"
-      min="0"
-      max="1"
-      step="0.01"
-      :value="volume"
-      @input="$emit('update:volume', parseFloat($event.target.value))"
-    />
+    <button class="volume-btn" @click="toggleMute">
+      <svg v-if="displayVolume === 0" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>
+      </svg>
+      <svg v-else-if="displayVolume < 0.5" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M18.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM5 9v6h4l5 5V4L9 9H5z"/>
+      </svg>
+      <svg v-else width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+      </svg>
+    </button>
+    <div 
+      class="slider-wrapper"
+      ref="sliderWrapper"
+      @mousedown="startDrag"
+      @touchstart.prevent="startDrag"
+    >
+      <div class="slider-track">
+        <div class="slider-fill" :style="{ width: displayPercent + '%' }"></div>
+      </div>
+      <div class="slider-thumb" :style="{ left: displayPercent + '%' }"></div>
+    </div>
   </div>
 </template>
 
 <script>
-import VolumeIcon from '@/assets/VolumeIcon.vue';
-
 export default {
   name: 'Volume',
   props: {
@@ -23,9 +34,82 @@ export default {
       required: true,
     },
   },
-  components: {
-    VolumeIcon,
+  data() {
+    return {
+      previousVolume: 0.5,
+      isDragging: false,
+      dragPercent: 0
+    };
   },
+  computed: {
+    volumePercent() {
+      return Math.min(100, Math.max(0, this.volume * 100));
+    },
+    displayPercent() {
+      return this.isDragging ? this.dragPercent : this.volumePercent;
+    },
+    displayVolume() {
+      return this.isDragging ? this.dragPercent / 100 : this.volume;
+    }
+  },
+  methods: {
+    toggleMute() {
+      if (this.volume > 0) {
+        this.previousVolume = this.volume;
+        this.$emit('update:volume', 0);
+      } else {
+        this.$emit('update:volume', this.previousVolume);
+      }
+    },
+    
+    getPercentFromEvent(e) {
+      const wrapper = this.$refs.sliderWrapper;
+      if (!wrapper) return 0;
+      
+      const rect = wrapper.getBoundingClientRect();
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const x = Math.max(0, Math.min(clientX - rect.left, rect.width));
+      return (x / rect.width) * 100;
+    },
+    
+    startDrag(e) {
+      e.preventDefault();
+      this.isDragging = true;
+      this.dragPercent = this.getPercentFromEvent(e);
+      
+      // Сразу применяем
+      this.$emit('update:volume', this.dragPercent / 100);
+      
+      document.addEventListener('mousemove', this.handleDrag);
+      document.addEventListener('mouseup', this.stopDrag);
+      document.addEventListener('touchmove', this.handleDrag);
+      document.addEventListener('touchend', this.stopDrag);
+    },
+    
+    handleDrag(e) {
+      if (!this.isDragging) return;
+      
+      // Use requestAnimationFrame for smooth, lag-free updates
+      requestAnimationFrame(() => {
+        if (!this.isDragging) return;
+        this.dragPercent = this.getPercentFromEvent(e);
+        this.$emit('update:volume', this.dragPercent / 100);
+      });
+    },
+    
+    stopDrag() {
+      if (!this.isDragging) return;
+      
+      this.isDragging = false;
+      document.removeEventListener('mousemove', this.handleDrag);
+      document.removeEventListener('mouseup', this.stopDrag);
+      document.removeEventListener('touchmove', this.handleDrag);
+      document.removeEventListener('touchend', this.stopDrag);
+    }
+  },
+  beforeUnmount() {
+    this.stopDrag();
+  }
 };
 </script>
 
@@ -33,93 +117,81 @@ export default {
 .volume-control {
   display: flex;
   align-items: center;
-  width: 50%;
-  max-width: min(80vw, 300px);
+  gap: 10px;
+  width: 100%;
+  max-width: 180px;
+}
+
+.volume-btn {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s;
+  flex-shrink: 0;
+}
+
+.volume-btn:hover {
   color: white;
-  gap: min(1vw, 10px);
 }
 
-input[type="range"] {
+.slider-wrapper {
   flex: 1;
-  min-width: 50px;
-  margin: 0;
-  background: linear-gradient(to right, #00CED1, #008fee);
-  height: min(0.8vh, 5px);
-  border-radius: 5px;
-  outline: none;
-  -webkit-appearance: none;
+  position: relative;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  touch-action: none;
 }
 
-input[type="range"]::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: min(1.5vh, 15px);
-  height: min(1.5vh, 15px);
+.slider-track {
+  position: absolute;
+  width: 100%;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.slider-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #00d9e7 0%, #9333ea 100%);
+  border-radius: 2px;
+  /* No transition for immediate response to drag */
+}
+
+.slider-thumb {
+  position: absolute;
+  width: 12px;
+  height: 12px;
   background: white;
   border-radius: 50%;
+  transform: translateX(-50%);
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.2s ease;
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.3);
+  transition: transform 0.1s ease;
 }
 
-input[type="range"]:hover::-webkit-slider-thumb {
-  opacity: 1;
+.slider-thumb:hover {
+  transform: translateX(-50%) scale(1.2);
 }
 
-/* Для Firefox */
-input[type="range"]::-moz-range-thumb {
-  width: min(1.5vh, 15px);
-  height: min(1.5vh, 15px);
-  background: white;
-  border-radius: 50%;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-
-input[type="range"]:hover::-moz-range-thumb {
-  opacity: 1;
-}
-
-/* Всегда показывать ползунок на мобильных */
-@media (hover: none) {
-  input[type="range"]::-webkit-slider-thumb {
-    opacity: 1 !important;
-  }
-  input[type="range"]::-moz-range-thumb {
-    opacity: 1 !important;
-  }
-}
-
-/* Адаптация для маленьких высот */
-@media (max-height: 600px) {
-  input[type="range"] {
-    height: min(0.7vh, 4px);
-  }
-  
-  input[type="range"]::-webkit-slider-thumb {
-    width: min(1.3vh, 12px);
-    height: min(1.3vh, 12px);
-  }
-}
-
-@media (max-height: 500px) {
-  input[type="range"] {
-    height: min(0.6vh, 3px);
-  }
-  
-  input[type="range"]::-webkit-slider-thumb {
-    width: min(1.1vh, 10px);
-    height: min(1.1vh, 10px);
-  }
-}
-
-@media (max-height: 400px) {
+/* Скрыть на мобильных */
+@media (max-width: 768px) {
   .volume-control {
-    max-width: min(75vw, 200px);
+    display: none;
   }
-  
-  input[type="range"] {
-    height: min(0.5vh, 2px);
+}
+
+/* Показывать только на устройствах с hover (десктоп) */
+@media (hover: none) and (pointer: coarse) {
+  .volume-control {
+    display: none;
   }
 }
 </style>

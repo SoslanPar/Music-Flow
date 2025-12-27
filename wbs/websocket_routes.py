@@ -150,29 +150,29 @@ class WebSocketRoutes:
             return  # Просто ответ на запрос времени
 
         if msg_type == "play":
-            await self.manager.update_room_state(room_id, {
-                "status_track": True,
-                "time_moment": data.get("position", 0)
-            })
+            # await self.manager.update_room_state(room_id, {
+            #     "status_track": True,
+            #     "time_moment": data.get("position", 0)
+            # })
             await self.manager.broadcast(room_id, {
                 "type": "play",
                 "position": data.get("position", 0)
             }, exclude_user=user_id)
 
         elif msg_type == "pause":
-            await self.manager.update_room_state(room_id, {
-                "status_track": False,
-                "time_moment": data.get("position", 0)
-            })
+            # await self.manager.update_room_state(room_id, {
+            #     "status_track": False,
+            #     "time_moment": data.get("position", 0)
+            # })
             await self.manager.broadcast(room_id, {
                 "type": "pause",
                 "position": data.get("position", 0)
             }, exclude_user=user_id)
 
         elif msg_type == "seek":
-            await self.manager.update_room_state(room_id, {
-                "time_moment": data.get("position", 0)
-            })
+            # await self.manager.update_room_state(room_id, {
+            #     "time_moment": data.get("position", 0)
+            # })
             await self.manager.broadcast(room_id, {
                 "type": "seek",
                 "position": data.get("position", 0)
@@ -216,8 +216,8 @@ class WebSocketRoutes:
                     })
         elif msg_type == "next_track":
             current_time = time.time()
-            if hasattr(self, 'last_track_change') and current_time - self.last_track_change < 4.0:
-                return
+            # if hasattr(self, 'last_track_change') and current_time - self.last_track_change < 4.0:
+            #     return
             self.last_track_change = current_time
             room_state = await self.manager.get_room_state(room_id)
             new_index = (room_state['index_track'] + 1) % len(room_state['list_track'])
@@ -262,4 +262,38 @@ class WebSocketRoutes:
             #     "participants": participants
             # })
             await self.manager.update_participants(room_id)
+
+        elif msg_type == "reorder_tracks":
+            # Получаем новый порядок треков и текущий индекс
+            new_tracks = data.get("tracks", [])
+            new_index = data.get("index", 0)
+            
+            if new_tracks:
+                await self.manager.update_room_state(room_id, {
+                    "list_track": new_tracks,
+                    "index_track": new_index
+                })
+                # Оповещаем всех участников о новом порядке
+                await self.manager.broadcast(room_id, {
+                    "type": "tracks_reordered",
+                    "tracks": new_tracks,
+                    "index": new_index
+                }, exclude_user=user_id)
+
+        elif msg_type == "play_track_by_index":
+            # Воспроизведение трека по индексу
+            index = data.get("index", 0)
+            room_state = await self.manager.get_room_state(room_id)
+            
+            if room_state.get("list_track") and 0 <= index < len(room_state["list_track"]):
+                await self.manager.update_room_state(room_id, {
+                    "index_track": index,
+                    "time_moment": 0,
+                    "status_track": False,
+                })
+                await self.manager.broadcast(room_id, {
+                    "type": "load_track",
+                    "url": room_state["list_track"][index],
+                    "index": index
+                })
 

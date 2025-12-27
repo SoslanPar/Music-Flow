@@ -1,12 +1,22 @@
 <script setup>
-import { ref } from 'vue';
-import {onMounted, nextTick } from 'vue';
+import { ref, onMounted, nextTick } from 'vue';
+import { useRouter } from 'vue-router';
 import Logo from '@/assets/logo.vue';
 import AccountIcon from '@/assets/Account.vue';
 import Button from '@/components/Button.vue';
 import { gsap } from "gsap/dist/gsap";
+import { getCookie } from '@/utils/cookies.js';
+
+const router = useRouter();
 
 onMounted(async () => {
+  // Если пользователь авторизован, редирект на Main
+  const userId = getCookie('user_id');
+  if (userId) {
+    router.push('/main');
+    return;
+  }
+  
   await nextTick();
   gsap.from('.content-container', { opacity: 0, y: 50, duration: 2, delay: 0.25, ease: 'power2.out' });
 });
@@ -41,17 +51,6 @@ const tabs = [
       </ul>`
   }
 ];
-// let dom = window.location.hostname;
-// console.log(dom);
-// let matches = fetch(`https://uniform-connections-scroll-cloud.trycloudflare.com/auth/sign-in?nickname=ch1l&hashed_password=5994471abb01112afcc18159f6cc74b4f511b99806da59b3caf5a9c173cacfc5&domen=${dom}`, { method: 'GET'});
-// console.log(matches);
-
-// let matches = await fetch("/https://uniform-connections-scroll-cloud.trycloudflare.com/auth/sign-in?nickname=ch1l&hashed_password=5994471abb01112afcc18159f6cc74b4f511b99806da59b3caf5a9c173cacfc5", {method:GET});
-
-// async function getCookie(name) {
-//                 let matches = await fetch("/https://uniform-connections-scroll-cloud.trycloudflare.com/get_cookie", {method:GET});
-//                 return await matches.json();
-//             }
 </script>
 
 

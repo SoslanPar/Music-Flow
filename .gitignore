@@ -5,10 +5,6 @@ venv/
 *.pyo
 *.pyd
 .DS_Store
-https://github.com/VladislavSnytko/fast_test
-git remote add origin https://github.com/VladislavSnytko/fast_test.git
-git branch -M main
-git push -u origin main
 .DS_Store
 node_modules
 *.log

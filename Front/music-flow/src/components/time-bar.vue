@@ -1,24 +1,23 @@
 <template>
-  <div class="progress-container" @click="seekFromClick">
-    <!-- Время слева -->
-    <div class="time current-time">{{ formatTime(currentTime) }}</div>
+  <div class="progress-wrapper">
+    <div class="time-display current">{{ formatTime(currentTime) }}</div>
     
-    <!-- Прогресс-бар с динамическим градиентом -->
-    <div
-      class="progress-line"
-      :style="gradientStyle"
-    ></div>
-    
-    <!-- Время справа -->
-    <div class="time duration">{{ formatTime(duration) }}</div>
-    
-    <!-- Точка прогресса -->
-    <div
-      id="progress"
-      class="progress-dot"
-      :style="{ left: dotPosition }"
+    <div 
+      class="progress-container" 
+      ref="progressContainer"
       @mousedown="startDrag"
-    ></div>
+      @touchstart="startDrag"
+    >
+      <div class="progress-track">
+        <div class="progress-fill" :style="{ width: displayPercent + '%' }"></div>
+      </div>
+      <div
+        class="progress-thumb"
+        :style="{ left: displayPercent + '%' }"
+      ></div>
+    </div>
+    
+    <div class="time-display duration">{{ formatTime(duration) }}</div>
   </div>
 </template>
 
@@ -38,133 +37,165 @@ export default {
   data() {
     return {
       isDragging: false,
+      dragPercent: 0,
     };
   },
   computed: {
-    // Позиция точки на прогресс-баре в процентах
-    dotPosition() {
-      if (!this.duration) return '0%';
-      return `${(this.currentTime / this.duration) * 100}%`;
+    progressPercent() {
+      if (!this.duration || this.duration === 0) return 0;
+      return Math.min(100, Math.max(0, (this.currentTime / this.duration) * 100));
     },
-    // Динамическое вычисление градиента
-    gradientStyle() {
-      const position = (this.currentTime / this.duration) * 100; // В процентах
-      const transitionWidth = 50; // Увеличенная ширина перехода
-      return {
-        background: `linear-gradient(to right,
-          #00CED1 0%,
-          #00CED1 calc(${position}% - ${transitionWidth}px),
-          color-mix(in srgb, #00CED1 75%, #8A2BE2 25%) calc(${position}% - ${transitionWidth * 0.66}px),
-          color-mix(in srgb, #00CED1 50%, #8A2BE2 50%) calc(${position}% - ${transitionWidth * 0.33}px),
-          color-mix(in srgb, #00CED1 25%, #8A2BE2 75%) ${position}%,
-          #8A2BE2 calc(${position}% + 5px),
-          #8A2BE2 100%)`,
-        width: '100%',
-        height: '5px',
-        borderRadius: '5px',
-        position: 'absolute',
-      };
-    },
+    displayPercent() {
+      return this.isDragging ? this.dragPercent : this.progressPercent;
+    }
   },
   methods: {
-    // Форматируем время в формате mm:ss
     formatTime(seconds) {
+      if (!seconds || !isFinite(seconds)) return '0:00';
       const minutes = Math.floor(seconds / 60);
       const remainingSeconds = Math.floor(seconds % 60);
-      return `${minutes}:${remainingSeconds < 10 ? '0' : ''}${remainingSeconds}`;
+      return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
     },
-    // При клике на прогресс-бар вычисляем новое время
-    seekFromClick(e) {
-      const rect = e.currentTarget.getBoundingClientRect();
-      const clickX = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
-      const newTime = (clickX / rect.width) * this.duration;
-      this.$emit('seek', newTime); // Отправляем новое время в родительский компонент
+    
+    getPercentFromEvent(e) {
+      const container = this.$refs.progressContainer;
+      if (!container) return 0;
+      
+      const rect = container.getBoundingClientRect();
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const x = Math.max(0, Math.min(clientX - rect.left, rect.width));
+      return (x / rect.width) * 100;
     },
-    // Начало перетаскивания
-    startDrag() {
+    
+    startDrag(e) {
+      if (!isFinite(this.duration) || this.duration === 0) return;
+      
+      e.preventDefault();
       this.isDragging = true;
+      this.dragPercent = this.getPercentFromEvent(e);
+      
+      // Сразу применяем позицию
+      const newTime = (this.dragPercent / 100) * this.duration;
+      this.$emit('seek', newTime);
+      
       document.addEventListener('mousemove', this.handleDrag);
       document.addEventListener('mouseup', this.stopDrag);
+      document.addEventListener('touchmove', this.handleDrag);
+      document.addEventListener('touchend', this.stopDrag);
     },
-    // Обработка перетаскивания
+    
     handleDrag(e) {
       if (!this.isDragging) return;
-
-      const progressBar = this.$el;
-      const rect = progressBar.getBoundingClientRect();
-      const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
-      const newTime = (x / rect.width) * this.duration;
-
-      this.$emit('seek', newTime); // Отправляем новое время в родительский компонент
+      
+      this.dragPercent = this.getPercentFromEvent(e);
+      const newTime = (this.dragPercent / 100) * this.duration;
+      this.$emit('seek', newTime);
     },
-    // Завершение перетаскивания
+    
     stopDrag() {
       if (!this.isDragging) return;
+      
       this.isDragging = false;
       document.removeEventListener('mousemove', this.handleDrag);
       document.removeEventListener('mouseup', this.stopDrag);
+      document.removeEventListener('touchmove', this.handleDrag);
+      document.removeEventListener('touchend', this.stopDrag);
     },
   },
+  beforeUnmount() {
+    this.stopDrag();
+  }
 };
 </script>
 
 
 <style scoped>
-.progress-container {
-  position: relative;
+.progress-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   width: 100%;
-  height: 5px;
-  /* background: rgba(255, 255, 255, 0.2); */
-  border-radius: 4px;
-  cursor: pointer;
+  padding: 8px 0;
 }
 
-.progress-line {
-  position: absolute;
-  height: 100%;
-  width: 100%;
-  border-radius: 4px;
-  z-index: 1;
-}
-
-.progress-dot {
-  position: absolute;
-  top: 50%;
-  width: 16px;
-  height: 16px;
-  background-color: #deb8ff;
-  border-radius: 50%;
-  transform: translate(-50%, -50%);
-  cursor: grab;
-  z-index: 2;
-}
-
-.progress-dot:active {
-  cursor: grabbing;
-  transform: translate(-50%, -50%) scale(1.25);
-}
-
-/* Стили для времени */
-.time {
-  padding: 10px;
-  position: absolute;
-  font-size: 15px;
+.time-display {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  min-width: 36px;
   user-select: none;
 }
 
-.current-time {
-  /* left: 5px; */
-  top: 10px;
-  color: #94F6F6;
-  text-shadow: 0px 0px 7.5px #00FFD4;
-  pointer-events: none
+.time-display.current {
+  color: #00d9e7;
+  text-align: left;
+  text-shadow: 0 0 8px rgba(0, 217, 231, 0.6), 0 0 16px rgba(0, 217, 231, 0.3);
 }
 
-.duration {
-  right: 5px;
-  top: 10px;
-  color: #D794F3;
-  text-shadow: 0px 0px 7.5px #EF149F;
-  pointer-events: none
+.time-display.duration {
+  color: #9333ea;
+  text-align: right;
+  text-shadow: 0 0 8px rgba(147, 51, 234, 0.6), 0 0 16px rgba(147, 51, 234, 0.3);
+}
+
+.progress-container {
+  flex: 1;
+  position: relative;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.progress-track {
+  width: 100%;
+  height: 4px;
+  background: rgba(147, 51, 234, 0.3);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #00d9e7 0%, #9333ea 100%);
+  border-radius: 2px;
+}
+
+.progress-thumb {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  background: #D0BCFF;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  cursor: grab;
+  box-shadow: 0 0 8px rgba(208, 188, 255, 0.5);
+  transition: transform 0.1s ease;
+}
+
+.progress-thumb:hover {
+  transform: translate(-50%, -50%) scale(1.2);
+}
+
+.progress-thumb:active {
+  cursor: grabbing;
+  transform: translate(-50%, -50%) scale(1.1);
+}
+
+@media (max-width: 480px) {
+  .progress-wrapper {
+    gap: 8px;
+  }
+  
+  .time-display {
+    font-size: 11px;
+    min-width: 30px;
+  }
+  
+  .progress-thumb {
+    width: 16px;
+    height: 16px;
+  }
 }
 </style>

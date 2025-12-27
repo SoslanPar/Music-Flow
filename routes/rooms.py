@@ -1,14 +1,18 @@
 import json
 import os
+import asyncio
 import sqlalchemy
 from yandex_music import Client
 from fastapi import APIRouter, HTTPException, Request, Response, Depends
 from fastapi.responses import (HTMLResponse, RedirectResponse, JSONResponse)
 from fastapi.templating import Jinja2Templates
+from aiocache import cached, Cache
+from aiocache.serializers import JsonSerializer
 from services.rooms_services import Rooms, RoomsServices
 from services.users_services import UserServices
 from db.base import Database
 from dotenv import load_dotenv
+from concurrent.futures import ThreadPoolExecutor
 
 
 db = Database()
@@ -18,6 +22,43 @@ templates = Jinja2Templates(directory="templates")
 
 DOMAIN = os.getenv("DOMAIN")
 OAUTH_TOKEN = os.getenv("OAUTH_TOKEN")
+
+# Пул потоков для синхронных операций Yandex Music API
+executor = ThreadPoolExecutor(max_workers=10)
+
+# Кэш для информации о треках (TTL 5 минут)
+track_info_cache = Cache(Cache.MEMORY, serializer=JsonSerializer())
+
+
+def _get_track_info_sync(track_id: str, client: Client) -> dict:
+    """Синхронное получение информации о треке"""
+    track = client.tracks(track_id)[0]
+    return {
+        "title": track.title,
+        "artist": ", ".join(artist.name for artist in track.artists),
+        "cover": f"https://{track.cover_uri.replace('%%', '50x50')}",
+        "duration": track.duration_ms / 1000 if track.duration_ms else None
+    }
+
+
+async def get_track_info_cached(track_id: str) -> dict:
+    """Получение информации о треке с кэшированием"""
+    cache_key = f"track_info:{track_id}"
+    
+    # Проверяем кэш
+    cached_info = await track_info_cache.get(cache_key)
+    if cached_info:
+        return cached_info
+    
+    # Если нет в кэше - получаем из API в отдельном потоке
+    loop = asyncio.get_event_loop()
+    client = Client(OAUTH_TOKEN).init()
+    track_info = await loop.run_in_executor(executor, _get_track_info_sync, track_id, client)
+    
+    # Сохраняем в кэш на 5 минут
+    await track_info_cache.set(cache_key, track_info, ttl=300)
+    
+    return track_info
 
 
 
@@ -78,50 +119,85 @@ async def join_room(room_id: str, request: Request):
 
 
 @router.get("/{room_id}/queue")
-async def get_queue_tracks(room_id: str, track_id: str):
+async def get_queue_tracks(room_id: str, track_id: str = ""):
     room_model = RoomsServices(db)
     info = await room_model.get_tracks_from_room(room_id)
-    tracks = []
-    print(info)
-    client = Client(OAUTH_TOKEN).init()
+    print(f"Queue request for room {room_id}, track_id: {track_id}")
+    
     try:
+        # Если запрашивается информация об одном треке
         if track_id:
-            
-            track = client.tracks(track_id)[0]
-            track_info = {
-                "title": track.title,
-                "artist": ", ".join(artist.name for artist in track.artists),
-                "cover": f"https://{track.cover_uri.replace('%%', '50x50')}"
-            }
-            print(track_info)
-            return JSONResponse(content={'new_track': track_info},
-                            headers={
-                                "Access-Control-Allow-Origin": DOMAIN,
-                                "Access-Control-Allow-Credentials": "true",
-                            })
-        for url in info['list_track']:
+            track_info = await get_track_info_cached(track_id)
+            return JSONResponse(
+                content={'new_track': track_info},
+                headers={
+                    "Access-Control-Allow-Origin": DOMAIN,
+                    "Access-Control-Allow-Credentials": "true",
+                }
+            )
+        
+        # Получаем информацию о всех треках параллельно
+        track_urls = info.get('list_track', [])
+        if not track_urls:
+            return JSONResponse(
+                content={'list_track': [], 'index': 0},
+                headers={
+                    "Access-Control-Allow-Origin": DOMAIN,
+                    "Access-Control-Allow-Credentials": "true",
+                }
+            )
+        
+        # Извлекаем track_id из URL и получаем информацию параллельно
+        async def get_track_from_url(url: str) -> dict:
             clean_url = url.split("?")[0]
-            track_id = clean_url.split("track/")[1].split("/")[0]
-            print('type:', type(track_id))
-            # track = await get_cached_track_info(track_id, user_id)
-            
-            track = client.tracks(track_id)[0]
-            # download_info = track.get_download_info(get_direct_links=True)[0]
-            # stream_url = download_info.get_direct_link()
+            tid = clean_url.split("track/")[1].split("/")[0]
+            return await get_track_info_cached(tid)
+        
+        # Параллельное получение всех треков
+        tracks = await asyncio.gather(*[get_track_from_url(url) for url in track_urls])
 
-            track_info = {
-                "title": track.title,
-                "artist": ", ".join(artist.name for artist in track.artists),
-                "cover": f"https://{track.cover_uri.replace('%%', '50x50')}"
+        return JSONResponse(
+            content={'list_track': list(tracks), 'index': info.get('index', 0)},
+            headers={
+                "Access-Control-Allow-Origin": DOMAIN,
+                "Access-Control-Allow-Credentials": "true",
             }
-            print(track_info)
-            tracks.append(track_info)
-
-        return JSONResponse(content={'list_track': tracks, 'index': info['index']},
-                            headers={
-                                "Access-Control-Allow-Origin": DOMAIN,
-                                "Access-Control-Allow-Credentials": "true",
-                            })
+        )
     except Exception as e:
-        print(str(e))
+        print(f"Error in get_queue_tracks: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/user/{user_id}/rooms")
+async def get_user_rooms(user_id: str):
+    """Получить список комнат пользователя"""
+    try:
+        user_model = UserServices(db)
+        room_model = RoomsServices(db)
+        
+        # Получаем ID комнат пользователя
+        room_ids = await user_model.get_user_rooms(user_id)
+        
+        if not room_ids:
+            return JSONResponse(content={'rooms': []})
+        
+        # Получаем информацию о каждой комнате
+        rooms = []
+        for room_id in room_ids:
+            try:
+                async with db.session_factory() as session:
+                    room = await session.get(Rooms, room_id)
+                    if room:
+                        rooms.append({
+                            'id': str(room.id),
+                            'name': room.name_room,
+                            'participants_count': len(room.list_of_participants) if room.list_of_participants else 0
+                        })
+            except Exception as e:
+                print(f"Error getting room {room_id}: {e}")
+                continue
+        
+        return JSONResponse(content={'rooms': rooms})
+    except Exception as e:
+        print(f"Error in get_user_rooms: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))

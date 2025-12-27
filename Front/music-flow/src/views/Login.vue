@@ -102,4 +102,66 @@ function toggleForm() {
   </div>
 </template>
 
+<style scoped>
+.login-container {
+  display: flex;
+  min-height: 100vh;
+  width: 100%;
+  background: linear-gradient(135deg, #1a1025 0%, #0d1a24 50%, #1a0f28 100%);
+}
 
+.logo-section {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+}
+
+.form-section {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+}
+
+@media (max-width: 1024px) {
+  .login-container {
+    flex-direction: column;
+    min-height: 100dvh;
+  }
+  
+  .logo-section {
+    flex: none;
+    padding: 30px 20px 10px 20px;
+  }
+  
+  .form-section {
+    flex: 1;
+    padding: 10px 20px 30px 20px;
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 600px) {
+  .logo-section {
+    padding: 20px 15px 5px 15px;
+  }
+  
+  .logo-section :deep(svg) {
+    width: 200px !important;
+    height: auto !important;
+  }
+  
+  .form-section {
+    padding: 10px 15px 20px 15px;
+  }
+}
+
+@media (max-width: 380px) {
+  .logo-section :deep(svg) {
+    width: 160px !important;
+  }
+}
+</style>

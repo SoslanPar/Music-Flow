@@ -4,7 +4,7 @@ import { onMounted } from 'vue';
 const loadYandexSdk = () => {
   return new Promise((resolve, reject) => {
     if (window.YaSendSuggestToken) {
-      resolve(); // SDK уже загружен
+      resolve();
       return;
     }
 
@@ -19,24 +19,29 @@ const loadYandexSdk = () => {
 onMounted(async () => {
   console.log('YandexCallback mounted. Parsing token...');
 
-  const hash = window.location.hash.substring(2);
   const params = new URLSearchParams(window.location.search);
   const token = params.get('code');
-  console.log('YandexCallback — token:', params);
+  console.log('YandexCallback — code:', token);
 
   if (!token) {
-    console.error('Токен не найден в URL');
+    console.error('Код авторизации не найден в URL');
+    // Отправляем сообщение об ошибке родителю
+    if (window.opener) {
+      window.opener.postMessage({
+        type: 'yandex_auth_error',
+        error: 'Code not found'
+      }, window.location.origin);
+      window.close();
+    }
     return;
   }
 
-  // Сохраняем токен (по желанию)
   localStorage.setItem('yandex_token', token);
 
   try {
     await loadYandexSdk();
     console.log('Yandex SDK загружен. Вызываем YaSendSuggestToken...');
 
-    // Передаём токен родителю (origin должен быть точным)
     window.YaSendSuggestToken(window.location.origin, {
       token: token
     });
@@ -46,25 +51,51 @@ onMounted(async () => {
     console.error('Ошибка при работе с Yandex SDK:', e);
   }
 
-  // Закрываем popup (если открыт в новом окне)
+  // Закрываем popup
   if (window.opener) {
     setTimeout(() => {
       window.close();
-    }, 500); // даём чуть-чуть времени на передачу
+    }, 500);
   }
 });
 </script>
 
 <template>
-  <div style="display: flex; justify-content: center; align-items: center; height: 100vh;">
+  <div class="callback-container">
+    <div class="loader"></div>
     <p>Авторизация через Яндекс... Подождите</p>
   </div>
 </template>
 
 <style scoped>
+.callback-container {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  gap: 20px;
+  background: linear-gradient(135deg, #1F1431 0%, #112433 50%, #361A3C 100%);
+}
+
 p {
-  font-family: sans-serif;
-  color: #333;
+  font-family: 'Nunito', sans-serif;
+  color: rgba(255, 255, 255, 0.8);
   font-size: 1.1rem;
+}
+
+.loader {
+  width: 40px;
+  height: 40px;
+  border: 3px solid rgba(208, 188, 255, 0.3);
+  border-top-color: #D0BCFF;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>

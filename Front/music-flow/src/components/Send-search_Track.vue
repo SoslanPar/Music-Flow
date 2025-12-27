@@ -3,21 +3,20 @@
     <input 
       type="text" 
       v-model="trackUrl" 
-      placeholder="Вставьте ссылку на трек из Яндекс.Музыки" 
+      placeholder="Track name" 
       class="send-input"
       @keyup.enter="handleSend"
     >
-    <Send class="send-button" @click="handleSend"/>
+    <button class="send-btn" @click="handleSend" :disabled="!trackUrl.trim()">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+      </svg>
+    </button>
   </div>
 </template>
 
 <script>
-import Send from '@/assets/Send.vue';
-
 export default {
-  components: {
-    Send
-  },
   data() {
     return {
       trackUrl: ''
@@ -38,42 +37,53 @@ export default {
 .send-container {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px;
+  gap: 12px;
+  padding: 12px 16px;
   background: rgba(23, 18, 34, 0.7);
-  border-radius: 50px;
-  /* border-top: 1px solid rgba(208, 188, 255, 0.2); */
+  border-radius: 16px;
+  border: 1px solid rgba(208, 188, 255, 0.1);
 }
 
 .send-input {
-  flex-grow: 1;
-  background-color: rgba(160, 85, 245, 0.15);
-  min-height: 20px;
-  backdrop-filter: blur(10px);
+  flex: 1;
+  background: transparent;
   border: none;
-  border-radius: 50px;
-  padding: 12px 20px;
   color: white;
+  font-size: 14px;
   outline: none;
-  font-size: 16px;
-  box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+  padding: 8px 0;
 }
 
 .send-input::placeholder {
-  color: rgba(255, 255, 255, 0.6);
+  color: rgba(255, 255, 255, 0.4);
 }
 
-.send-button {
+.send-btn {
   width: 36px;
   height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  border: none;
+  color: white;
   cursor: pointer;
-  transition: all 0.3s ease;
-  fill: #D0BCFF;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  flex-shrink: 0;
 }
 
-.send-button:hover {
-  transform: scale(1.1);
-  fill: #ffffff;
+.send-btn:hover:not(:disabled) {
+  transform: scale(1.05);
+  box-shadow: 0 0 15px rgba(139, 92, 246, 0.4);
+}
+
+.send-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.send-btn svg {
+  margin-left: 2px;
 }
 </style>
-[file content end]

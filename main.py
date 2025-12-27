@@ -44,12 +44,6 @@ async def add_csp_header(request: Request, call_next):
     return response
 
 
-@app.get("/", response_class=HTMLResponse)
-async def player_page(request: Request):
-    cookies = request.cookies
-    print(cookies)
-    return templates.TemplateResponse("player.html", {"request": request})
-
 @app.get("/", response_class=JSONResponse)
 async def player_page():
     # cookies = request.cookies
