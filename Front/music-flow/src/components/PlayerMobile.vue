@@ -1,63 +1,64 @@
 <template>
-  <!-- Mobile Bottom Player (Spotify-style) -->
-  <div class="mobile-player" @click="openFullPlayer">
-    <!-- Mini Progress -->
-    <div class="mini-progress">
-      <div class="mini-progress-fill" :style="{ width: progressPercent + '%' }"></div>
-    </div>
-    
-    <!-- Main Content -->
-    <div class="mobile-player-content">
-      <!-- Cover & Info -->
-      <div class="mobile-left">
-        <div class="mobile-cover" ref="cover">
-          <img 
-            v-if="coverUrl" 
-            :src="coverUrl" 
-            alt="Cover" 
-            class="cover-img"
-          />
-          <div v-else class="cover-placeholder">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
-            </svg>
+  <div class="mobile-player-wrapper">
+    <!-- Mobile Bottom Player (Spotify-style) -->
+    <div class="mobile-player" @click="openFullPlayer">
+      <!-- Mini Progress -->
+      <div class="mini-progress">
+        <div class="mini-progress-fill" :style="{ width: progressPercent + '%' }"></div>
+      </div>
+      
+      <!-- Main Content -->
+      <div class="mobile-player-content">
+        <!-- Cover & Info -->
+        <div class="mobile-left">
+          <div class="mobile-cover" ref="cover">
+            <img 
+              v-if="coverUrl" 
+              :src="coverUrl" 
+              alt="Cover" 
+              class="cover-img"
+            />
+            <div v-else class="cover-placeholder">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+              </svg>
+            </div>
+          </div>
+          
+          <div class="mobile-info">
+            <div class="mobile-title">{{ title }}</div>
+            <div class="mobile-artist">{{ artist }}</div>
           </div>
         </div>
         
-        <div class="mobile-info">
-          <div class="mobile-title">{{ title }}</div>
-          <div class="mobile-artist">{{ artist }}</div>
+        <!-- Controls -->
+        <div class="mobile-controls">
+          <button class="mobile-btn like-btn" @click.stop="toggleLike">
+            <svg width="22" height="22" viewBox="0 0 24 24" :fill="isLiked ? '#D0BCFF' : 'none'" :stroke="isLiked ? '#D0BCFF' : 'currentColor'" stroke-width="2">
+              <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+            </svg>
+          </button>
+          
+          <button class="mobile-btn play-btn" @click.stop="togglePlay">
+            <svg v-if="!isPlaying" width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M8 5v14l11-7z"/>
+            </svg>
+            <svg v-else width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+            </svg>
+          </button>
         </div>
       </div>
-      
-      <!-- Controls -->
-      <div class="mobile-controls">
-        <button class="mobile-btn like-btn" @click.stop="toggleLike">
-          <svg width="22" height="22" viewBox="0 0 24 24" :fill="isLiked ? '#1DB954' : 'none'" :stroke="isLiked ? '#1DB954' : 'currentColor'" stroke-width="2">
-            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
-          </svg>
-        </button>
-        
-        <button class="mobile-btn play-btn" @click.stop="togglePlay">
-          <svg v-if="!isPlaying" width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M8 5v14l11-7z"/>
-          </svg>
-          <svg v-else width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
-          </svg>
-        </button>
-      </div>
     </div>
-  </div>
-  
-  <!-- Full Screen Player Modal -->
-  <Teleport to="body">
-    <Transition name="slide-up">
-      <div v-if="showFullPlayer" class="full-player-overlay" @click.self="closeFullPlayer">
-        <div class="full-player">
-          <!-- Header -->
-          <div class="full-player-header">
-            <button class="header-btn" @click="closeFullPlayer">
+    
+    <!-- Full Screen Player Modal -->
+    <Teleport to="body">
+      <Transition name="slide-up">
+        <div v-if="showFullPlayer" class="full-player-overlay" @click.self="closeFullPlayer">
+          <div class="full-player">
+            <!-- Header -->
+            <div class="full-player-header">
+              <button class="header-btn" @click="closeFullPlayer">
               <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M7 10l5 5 5-5z"/>
               </svg>
@@ -66,37 +67,38 @@
               <span class="playing-from">PLAYING FROM</span>
               <span class="playlist-name">{{ roomName }}</span>
             </div>
-            <button class="header-btn">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/>
-              </svg>
-            </button>
+            <!-- Placeholder для симметрии -->
+            <div class="header-btn-placeholder"></div>
           </div>
           
           <!-- Cover -->
           <div class="full-cover-wrapper">
-            <div class="full-cover" :class="{ 'playing': isPlaying }">
-              <img 
-                v-if="coverUrl" 
-                :src="coverUrl" 
-                alt="Cover"
-              />
-              <div v-else class="cover-placeholder-large">
-                <svg width="80" height="80" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
-                </svg>
+            <Transition name="cover-fade" mode="out-in">
+              <div class="full-cover" :class="{ 'playing': isPlaying }" :key="coverUrl">
+                <img 
+                  v-if="coverUrl" 
+                  :src="highResCoverUrl" 
+                  alt="Cover"
+                />
+                <div v-else class="cover-placeholder-large">
+                  <svg width="80" height="80" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+                  </svg>
+                </div>
               </div>
-            </div>
+            </Transition>
           </div>
           
           <!-- Info -->
           <div class="full-info">
-            <div class="full-info-left">
-              <h2 class="full-title">{{ title }}</h2>
-              <p class="full-artist">{{ artist }}</p>
-            </div>
+            <Transition name="info-slide" mode="out-in">
+              <div class="full-info-left" :key="title">
+                <h2 class="full-title">{{ title }}</h2>
+                <p class="full-artist">{{ artist }}</p>
+              </div>
+            </Transition>
             <button class="like-btn-full" @click="toggleLike">
-              <svg width="24" height="24" viewBox="0 0 24 24" :fill="isLiked ? '#1DB954' : 'none'" :stroke="isLiked ? '#1DB954' : 'currentColor'" stroke-width="2">
+              <svg width="24" height="24" viewBox="0 0 24 24" :fill="isLiked ? '#bf5af2' : 'none'" :stroke="isLiked ? '#bf5af2' : 'currentColor'" stroke-width="2">
                 <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
               </svg>
             </button>
@@ -121,12 +123,6 @@
           
           <!-- Main Controls -->
           <div class="full-controls">
-            <button class="control-btn shuffle-btn" :class="{ active: isShuffle }" @click="toggleShuffle">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/>
-              </svg>
-            </button>
-            
             <button class="control-btn prev-btn" @click="prevTrack">
               <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/>
@@ -147,31 +143,22 @@
                 <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/>
               </svg>
             </button>
-            
-            <button class="control-btn repeat-btn" :class="{ active: isRepeat }" @click="toggleRepeat">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/>
-              </svg>
-            </button>
           </div>
           
           <!-- Bottom Actions -->
           <div class="full-bottom">
-            <button class="bottom-btn">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
-              </svg>
-            </button>
-            <button class="bottom-btn" @click="showQueue">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <button class="bottom-btn queue-btn" @click="showQueue">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18c-.31-.11-.65-.18-1-.18-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3V8h3V6h-5z"/>
               </svg>
+              <span>Очередь</span>
             </button>
           </div>
         </div>
       </div>
     </Transition>
   </Teleport>
+  </div>
 </template>
 
 <script>
@@ -188,14 +175,12 @@ export default {
     roomName: { type: String, default: 'Комната' },
   },
   
-  emits: ['play', 'pause', 'prev', 'next', 'seek', 'shuffle', 'repeat', 'show-queue'],
+  emits: ['play', 'pause', 'prev', 'next', 'seek', 'show-queue'],
   
   data() {
     return {
       showFullPlayer: false,
       isLiked: false,
-      isShuffle: false,
-      isRepeat: false,
       isDragging: false,
       dragProgress: 0,
     };
@@ -206,6 +191,16 @@ export default {
       if (this.isDragging) return this.dragProgress;
       if (!this.duration) return 0;
       return (this.currentTime / this.duration) * 100;
+    },
+    
+    /**
+     * Обложка высокого разрешения для полноэкранного режима
+     */
+    highResCoverUrl() {
+      if (!this.coverUrl) return '';
+      // Yandex Music cover URLs содержат размер, например: 100x100, 200x200
+      // Заменяем на 400x400 для высокого разрешения
+      return this.coverUrl.replace(/\d+x\d+/, '400x400');
     }
   },
   
@@ -235,16 +230,6 @@ export default {
     
     toggleLike() {
       this.isLiked = !this.isLiked;
-    },
-    
-    toggleShuffle() {
-      this.isShuffle = !this.isShuffle;
-      this.$emit('shuffle', this.isShuffle);
-    },
-    
-    toggleRepeat() {
-      this.isRepeat = !this.isRepeat;
-      this.$emit('repeat', this.isRepeat);
     },
     
     openFullPlayer() {
@@ -316,7 +301,7 @@ export default {
   bottom: 0;
   left: 0;
   right: 0;
-  background: linear-gradient(180deg, rgba(40, 35, 60, 0.98) 0%, rgba(25, 20, 40, 0.99) 100%);
+  background: linear-gradient(180deg, rgba(25, 20, 40, 0.98) 0%, rgba(15, 12, 25, 0.99) 100%);
   backdrop-filter: blur(30px);
   -webkit-backdrop-filter: blur(30px);
   z-index: 1000;
@@ -331,7 +316,7 @@ export default {
 
 .mini-progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #1DB954, #1ed760);
+  background: linear-gradient(90deg, #00d9e7, #633A89);
   transition: width 0.25s linear;
 }
 
@@ -430,8 +415,8 @@ export default {
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background: white;
-  color: black;
+  background: #633A89;
+  color: white;
 }
 
 /* ============ FULL PLAYER ============ */
@@ -442,7 +427,7 @@ export default {
   right: 0;
   bottom: 0;
   z-index: 2000;
-  background: linear-gradient(180deg, #2a1f4c 0%, #1a1030 30%, #0d0815 100%);
+  background: linear-gradient(180deg, #1a1030 0%, #0d0815 30%, #050208 100%);
 }
 
 .full-player {
@@ -467,9 +452,19 @@ export default {
 .header-btn {
   background: transparent;
   border: none;
-  color: white;
+  color: rgba(255, 255, 255, 0.7);
   padding: 8px;
   cursor: pointer;
+  transition: color 0.2s;
+}
+
+.header-btn:hover {
+  color: white;
+}
+
+.header-btn-placeholder {
+  width: 40px;
+  height: 40px;
 }
 
 .header-title {
@@ -508,17 +503,32 @@ export default {
   aspect-ratio: 1/1;
   border-radius: 8px;
   overflow: hidden;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-  transition: transform 0.3s ease;
+  box-shadow: 
+    0 20px 60px rgba(0, 0, 0, 0.5),
+    0 0 0 rgba(99, 58, 137, 0);
+  transition: box-shadow 0.8s ease;
 }
 
 .full-cover.playing {
-  animation: pulse-glow 2s ease-in-out infinite;
+  box-shadow: 
+    0 20px 80px rgba(99, 58, 137, 0.35),
+    0 0 50px rgba(191, 90, 242, 0.2);
 }
 
-@keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5); }
-  50% { box-shadow: 0 20px 80px rgba(29, 185, 84, 0.2); }
+/* Pulse animation only when loading */
+.full-cover.loading {
+  animation: pulse-glow-loading 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-glow-loading {
+  0%, 100% { 
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  }
+  50% { 
+    box-shadow: 
+      0 20px 80px rgba(99, 58, 137, 0.5),
+      0 0 60px rgba(191, 90, 242, 0.3);
+  }
 }
 
 .full-cover img {
@@ -555,7 +565,10 @@ export default {
 .full-title {
   font-size: 22px;
   font-weight: 700;
-  color: white;
+  background: linear-gradient(90deg, #D0BCFF, #00d9e7);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
   margin: 0;
   white-space: nowrap;
   overflow: hidden;
@@ -575,6 +588,12 @@ export default {
   cursor: pointer;
   color: rgba(255, 255, 255, 0.6);
   flex-shrink: 0;
+  transition: color 0.2s, transform 0.2s;
+}
+
+.like-btn-full:hover {
+  color: #ff6b9d;
+  transform: scale(1.1);
 }
 
 /* Progress */
@@ -593,34 +612,50 @@ export default {
 
 .progress-fill {
   height: 100%;
-  background: white;
+  background: linear-gradient(90deg, #00d9e7, #633A89);
   border-radius: 2px;
   position: relative;
+  transition: none;
 }
 
 .progress-thumb {
   position: absolute;
   top: 50%;
-  width: 12px;
-  height: 12px;
-  background: white;
+  width: 16px;
+  height: 16px;
+  background: #D0BCFF;
   border-radius: 50%;
   transform: translate(-50%, -50%);
-  opacity: 0;
-  transition: opacity 0.2s;
+  opacity: 1;
+  box-shadow: 0 0 12px rgba(208, 188, 255, 0.6);
 }
 
 .progress-track:hover .progress-thumb,
 .progress-track:active .progress-thumb {
   opacity: 1;
+  transform: translate(-50%, -50%) scale(1.1);
 }
 
 .progress-times {
   display: flex;
   justify-content: space-between;
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
+  font-weight: 600;
   margin-top: 8px;
+}
+
+.progress-times span:first-child {
+  color: #00ffff;
+  text-shadow: 
+    0 0 5px rgba(0, 255, 255, 0.8),
+    0 0 10px rgba(0, 255, 255, 0.5);
+}
+
+.progress-times span:last-child {
+  color: #bf5af2;
+  text-shadow: 
+    0 0 5px rgba(191, 90, 242, 0.8),
+    0 0 10px rgba(191, 90, 242, 0.5);
 }
 
 /* Controls */
@@ -636,56 +671,73 @@ export default {
 .control-btn {
   background: transparent;
   border: none;
-  color: white;
+  color: rgba(255, 255, 255, 0.8);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: transform 0.15s, opacity 0.15s;
+  transition: transform 0.15s, opacity 0.15s, color 0.15s;
+}
+
+.control-btn:hover {
+  color: #D0BCFF;
 }
 
 .control-btn:active {
   transform: scale(0.9);
 }
 
-.shuffle-btn,
-.repeat-btn {
-  color: rgba(255, 255, 255, 0.6);
-  padding: 8px;
-}
-
-.shuffle-btn.active,
-.repeat-btn.active {
-  color: #1DB954;
-}
-
 .prev-btn,
 .next-btn {
-  padding: 8px;
+  padding: 12px;
+  color: #633A89;
+  width: 56px;
+  height: 56px;
+}
+
+.prev-btn:hover,
+.next-btn:hover {
+  color: #bf5af2;
 }
 
 .play-btn-main {
   width: 64px;
   height: 64px;
   border-radius: 50%;
-  background: white;
-  color: black;
+  background: #633A89;
+  color: white;
+  box-shadow: 0 4px 20px rgba(99, 58, 137, 0.4);
+}
+
+.play-btn-main:hover {
+  box-shadow: 0 6px 28px rgba(99, 58, 137, 0.6);
 }
 
 /* Bottom */
 .full-bottom {
   display: flex;
-  justify-content: space-around;
-  padding: 12px 0;
+  justify-content: center;
+  padding: 16px 0;
   flex-shrink: 0;
 }
 
-.bottom-btn {
-  background: transparent;
+.queue-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.1);
   border: none;
-  color: rgba(255, 255, 255, 0.6);
+  color: white;
   padding: 12px 24px;
+  border-radius: 24px;
   cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background 0.2s;
+}
+
+.queue-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
 }
 
 /* ============ ANIMATIONS ============ */
@@ -697,6 +749,38 @@ export default {
 .slide-up-enter-from,
 .slide-up-leave-to {
   transform: translateY(100%);
+}
+
+/* Cover fade animation */
+.cover-fade-enter-active,
+.cover-fade-leave-active {
+  transition: all 0.3s ease;
+}
+
+.cover-fade-enter-from {
+  opacity: 0;
+  transform: scale(0.95);
+}
+
+.cover-fade-leave-to {
+  opacity: 0;
+  transform: scale(1.05);
+}
+
+/* Info slide animation */
+.info-slide-enter-active,
+.info-slide-leave-active {
+  transition: all 0.25s ease;
+}
+
+.info-slide-enter-from {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+.info-slide-leave-to {
+  opacity: 0;
+  transform: translateY(-10px);
 }
 
 /* Safe area for devices with notch */

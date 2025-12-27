@@ -105,6 +105,16 @@
             </li>
           </ul>
         </div>
+        
+        <!-- Кнопка выхода в sidebar для мобильных -->
+        <div class="sidebar-section sidebar-leave-section">
+          <button class="sidebar-leave-btn" @click="leaveRoom">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M10.09 15.59L11.5 17l5-5-5-5-1.41 1.41L12.67 11H3v2h9.67l-2.58 2.59zM19 3H5c-1.11 0-2 .9-2 2v4h2V5h14v14H5v-4H3v4c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/>
+            </svg>
+            <span>Выйти из комнаты</span>
+          </button>
+        </div>
       </aside>
 
       <!-- Rooms View (не подключены) -->
@@ -221,26 +231,29 @@
             <TrackQueue 
               :tracks="tracks" 
               :currentTrackIndex="currentTrackIndex"
+              :isPlaying="isPlayerPlaying"
+              :isLoading="isQueueLoading"
               @reorder="onTracksReorder"
               @play-track="onPlayTrack"
+              @delete-track="onDeleteTrack"
             />
           </div>
           <div class="send-track-wrapper">
             <SendTrack @send="handleSendTrack"/>
           </div>
         </div>
-
-        <!-- Правый блок: Плеер (только на десктопе) -->
-        <div class="player-column desktop-only">
-          <AudioPlayer
-            ref="audioPlayer"
-            :roomId="roomId"
-            @participants-update="updateParticipantsList"
-            @update-tracks="updateTracksList"
-            @player-state="updatePlayerState"
-          />
-        </div>
       </div>
+      
+      <!-- Скрытый AudioPlayer для управления воспроизведением -->
+      <AudioPlayer
+        v-if="connected"
+        ref="audioPlayer"
+        :roomId="roomId"
+        class="hidden-player"
+        @participants-update="updateParticipantsList"
+        @update-tracks="updateTracksList"
+        @player-state="updatePlayerState"
+      />
     </div>
     
     <!-- Мобильный плеер (показывается внизу при подключении) -->
@@ -283,8 +296,8 @@
       @toggle-queue="toggleQueueSidebar"
     />
 
-    <!-- Кнопка выхода из комнаты -->
-    <button v-if="connected" class="leave-room-btn" @click="leaveRoom">
+    <!-- Кнопка выхода из комнаты (только на десктопе) -->
+    <button v-if="connected" class="leave-room-btn desktop-only" @click="leaveRoom">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
         <path d="M10.09 15.59L11.5 17l5-5-5-5-1.41 1.41L12.67 11H3v2h9.67l-2.58 2.59zM19 3H5c-1.11 0-2 .9-2 2v4h2V5h14v14H5v-4H3v4c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/>
       </svg>
@@ -353,6 +366,7 @@ export default {
       playerVolume: 1,
       isPlayerPlaying: false,
       isPlayerLoading: false,
+      isQueueLoading: false,
       showQueueSidebar: false,
     };
   },
@@ -421,6 +435,11 @@ export default {
       this.currentRoomName = room ? room.name : `Room ${roomId}`;
       this.connected = true;
       this.showRoomsDropdown = false;
+      // Показать загрузку очереди
+      this.isQueueLoading = true;
+      setTimeout(() => {
+        this.isQueueLoading = false;
+      }, 1500);
     },
     
     switchRoom(room) {
@@ -469,13 +488,13 @@ export default {
     },
     
     leaveRoom() {
+      this.sidebarOpen = false; // Закрываем sidebar сначала
       this.connected = false;
       this.roomId = null;
       this.currentRoomName = '';
       this.tracks = [];
       this.participants = [];
       this.currentTrackIndex = 0;
-      this.sidebarOpen = true;
     },
     
     handleLogout() {
@@ -521,7 +540,16 @@ export default {
     
     onPlayTrack(index) {
       if (this.$refs.audioPlayer) {
-        this.$refs.audioPlayer.playTrackByIndex(index);
+        // Если кликнули на текущий трек - toggle play/pause
+        if (index === this.currentTrackIndex) {
+          if (this.isPlaying) {
+            this.$refs.audioPlayer.sendPauseCommand();
+          } else {
+            this.$refs.audioPlayer.sendPlayCommand();
+          }
+        } else {
+          this.$refs.audioPlayer.playTrackByIndex(index);
+        }
       }
     },
     
@@ -568,8 +596,8 @@ export default {
     },
     
     showMobileQueue() {
-      // Открыть sidebar с очередью на мобильном
-      this.sidebarOpen = true;
+      // Закрытие full player в PlayerMobile происходит автоматически
+      // Очередь треков уже видна на главном экране
     },
     
     // Обновление состояния плеера из AudioPlayer
@@ -598,6 +626,35 @@ export default {
       }
       
       this.draggedRoom = null;
+    },
+    
+    // Удаление трека из очереди
+    async onDeleteTrack(index) {
+      if (index < 0 || index >= this.tracks.length) return;
+      
+      // Создаём новый список без удалённого трека
+      const newTracks = [...this.tracks];
+      newTracks.splice(index, 1);
+      
+      // Корректируем currentTrackIndex
+      let newCurrentIndex = this.currentTrackIndex;
+      if (index < this.currentTrackIndex) {
+        newCurrentIndex = this.currentTrackIndex - 1;
+      } else if (index === this.currentTrackIndex) {
+        // Если удаляем текущий трек, переключаемся на следующий (или предыдущий если в конце)
+        if (newCurrentIndex >= newTracks.length) {
+          newCurrentIndex = Math.max(0, newTracks.length - 1);
+        }
+      }
+      
+      // Обновляем локальное состояние
+      this.tracks = newTracks;
+      this.currentTrackIndex = newCurrentIndex;
+      
+      // Отправляем обновление на бекенд
+      if (this.$refs.audioPlayer) {
+        this.$refs.audioPlayer.sendReorderTracks(newTracks, newCurrentIndex);
+      }
     }
   }
 };
@@ -776,6 +833,43 @@ export default {
   display: block;
 }
 
+/* Hidden player (controls playback but not visible) */
+.hidden-player {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Sidebar leave section */
+.sidebar-leave-section {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid rgba(208, 188, 255, 0.1);
+}
+
+.sidebar-leave-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  background: rgba(255, 100, 100, 0.1);
+  border: 1px solid rgba(255, 100, 100, 0.2);
+  border-radius: 10px;
+  color: #ff8a8a;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.sidebar-leave-btn:hover {
+  background: rgba(255, 100, 100, 0.2);
+  border-color: rgba(255, 100, 100, 0.4);
+}
+
 .header-logo-full {
   height: 28px;
   width: auto;
@@ -922,18 +1016,55 @@ export default {
 
 /* Sidebar */
 .sidebar {
-  width: 220px;
-  min-width: 220px;
+  width: 280px;
+  min-width: 280px;
   background: rgba(23, 18, 34, 0.6);
   border-right: 1px solid rgba(208, 188, 255, 0.1);
   display: flex;
   flex-direction: column;
   overflow: hidden;
   transition: transform 0.3s ease, width 0.3s ease;
+  height: 100%;
 }
 
 .sidebar-section {
   padding: 12px;
+  flex-shrink: 0;
+}
+
+.sidebar-section.friends-list-section {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.sidebar-leave-section {
+  margin-top: auto;
+  padding: 16px;
+  border-top: 1px solid rgba(208, 188, 255, 0.1);
+  flex-shrink: 0;
+  background: rgba(15, 12, 25, 0.5);
+}
+
+.sidebar-leave-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: rgba(255, 100, 100, 0.1);
+  border: 1px solid rgba(255, 100, 100, 0.3);
+  border-radius: 12px;
+  color: #ff8a8a;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.sidebar-leave-btn:hover {
+  background: rgba(255, 100, 100, 0.2);
+  border-color: rgba(255, 100, 100, 0.5);
 }
 
 .sidebar-header {
@@ -1275,6 +1406,16 @@ export default {
   height: auto;
 }
 
+@media (max-width: 768px) {
+  .welcome-logo {
+    width: 200px;
+  }
+  
+  .welcome-logo :deep(svg) {
+    width: 200px;
+  }
+}
+
 .welcome-message h2 {
   font-size: 24px;
   color: white;
@@ -1315,19 +1456,10 @@ export default {
   flex-shrink: 0;
 }
 
-.player-column {
-  width: 340px;
-  min-width: 300px;
-  max-width: 400px;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-/* Leave Button */
+/* Leave Button (desktop only) */
 .leave-room-btn {
   position: fixed;
-  bottom: 16px;
+  bottom: 100px; /* Above desktop player */
   left: 16px;
   display: flex;
   align-items: center;
@@ -1350,17 +1482,6 @@ export default {
 
 /* Responsive */
 @media (max-width: 1100px) {
-  .room-view {
-    flex-direction: column;
-  }
-  
-  .player-column {
-    width: 100%;
-    max-width: none;
-    min-width: 0;
-    max-height: 380px;
-  }
-  
   .center-column {
     min-height: 200px;
   }
@@ -1401,18 +1522,31 @@ export default {
     left: 0;
     top: 56px;
     bottom: 0;
-    z-index: 150;
+    z-index: 1100; /* Above mobile player (z-index: 1000) */
     transform: translateX(-100%);
     width: 280px;
-    background: rgba(15, 12, 25, 0.95);
+    background: rgba(15, 12, 25, 0.98);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
     box-shadow: 4px 0 30px rgba(0, 0, 0, 0.5);
     transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    flex-direction: column;
   }
   
   .sidebar.sidebar-open {
     transform: translateX(0);
+  }
+  
+  .sidebar-leave-section {
+    padding: 16px;
+    padding-bottom: calc(80px + env(safe-area-inset-bottom, 16px)); /* Extra padding for player space */
+    background: rgba(15, 12, 25, 0.9);
+  }
+  
+  .sidebar-leave-btn {
+    font-size: 15px;
+    padding: 14px 20px;
   }
   
   .rooms-view {
@@ -1422,9 +1556,11 @@ export default {
   .rooms-sidebar {
     width: 100%;
     min-width: 0;
-    max-height: 50vh;
+    max-height: none;
+    flex: 1;
     border-right: none;
-    border-bottom: 1px solid rgba(208, 188, 255, 0.1);
+    border-bottom: none;
+    padding: 16px;
   }
   
   .rooms-main-area {
@@ -1437,20 +1573,9 @@ export default {
     padding-bottom: 80px; /* Место для мобильного плеера */
   }
   
-  .player-column {
-    display: none; /* Скрываем на мобильных, вместо него PlayerMobile */
-  }
-  
-  /* Кнопка выхода на мобильных - над плеером */
+  /* Кнопка выхода скрыта на мобильных - она в sidebar */
   .leave-room-btn {
-    bottom: 130px;
-    left: 50%;
-    transform: translateX(-50%);
-    padding: 8px 16px;
-    font-size: 12px;
-    background: rgba(255, 100, 100, 0.2);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
+    display: none !important;
   }
 }
 
@@ -1469,14 +1594,7 @@ export default {
   
   .room-view {
     padding: 8px;
-    padding-bottom: 130px;
-  }
-  
-  .leave-room-btn {
-    bottom: 120px;
-    width: auto;
-    left: 50%;
-    transform: translateX(-50%);
+    padding-bottom: 80px;
   }
 }
 </style>

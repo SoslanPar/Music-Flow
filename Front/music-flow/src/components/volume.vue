@@ -160,9 +160,9 @@ export default {
 
 .slider-fill {
   height: 100%;
-  background: linear-gradient(90deg, #00d9e7 0%, #9333ea 100%);
+  background: linear-gradient(90deg, #00d9e7 0%, #633A89 100%);
   border-radius: 2px;
-  /* No transition for immediate response to drag */
+  transition: none;
 }
 
 .slider-thumb {

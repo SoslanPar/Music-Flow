@@ -87,9 +87,13 @@ export default {
     handleDrag(e) {
       if (!this.isDragging) return;
       
-      this.dragPercent = this.getPercentFromEvent(e);
-      const newTime = (this.dragPercent / 100) * this.duration;
-      this.$emit('seek', newTime);
+      // Use requestAnimationFrame for smoother updates
+      requestAnimationFrame(() => {
+        if (!this.isDragging) return;
+        this.dragPercent = this.getPercentFromEvent(e);
+        const newTime = (this.dragPercent / 100) * this.duration;
+        this.$emit('seek', newTime);
+      });
     },
     
     stopDrag() {
@@ -123,18 +127,27 @@ export default {
   font-variant-numeric: tabular-nums;
   min-width: 36px;
   user-select: none;
+  font-weight: 600;
 }
 
 .time-display.current {
-  color: #00d9e7;
+  color: #00ffff;
   text-align: left;
-  text-shadow: 0 0 8px rgba(0, 217, 231, 0.6), 0 0 16px rgba(0, 217, 231, 0.3);
+  text-shadow: 
+    0 0 5px rgba(0, 255, 255, 0.8),
+    0 0 10px rgba(0, 255, 255, 0.6),
+    0 0 20px rgba(0, 255, 255, 0.4),
+    0 0 30px rgba(0, 255, 255, 0.2);
 }
 
 .time-display.duration {
-  color: #9333ea;
+  color: #bf5af2;
   text-align: right;
-  text-shadow: 0 0 8px rgba(147, 51, 234, 0.6), 0 0 16px rgba(147, 51, 234, 0.3);
+  text-shadow: 
+    0 0 5px rgba(191, 90, 242, 0.8),
+    0 0 10px rgba(191, 90, 242, 0.6),
+    0 0 20px rgba(191, 90, 242, 0.4),
+    0 0 30px rgba(191, 90, 242, 0.2);
 }
 
 .progress-container {
@@ -150,15 +163,16 @@ export default {
 .progress-track {
   width: 100%;
   height: 4px;
-  background: rgba(147, 51, 234, 0.3);
+  background: rgba(99, 58, 137, 0.3);
   border-radius: 2px;
   overflow: hidden;
 }
 
 .progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #00d9e7 0%, #9333ea 100%);
+  background: linear-gradient(90deg, #00d9e7 0%, #633A89 100%);
   border-radius: 2px;
+  transition: none;
 }
 
 .progress-thumb {
@@ -172,6 +186,7 @@ export default {
   cursor: grab;
   box-shadow: 0 0 8px rgba(208, 188, 255, 0.5);
   transition: transform 0.1s ease;
+  opacity: 1;
 }
 
 .progress-thumb:hover {
@@ -194,8 +209,9 @@ export default {
   }
   
   .progress-thumb {
-    width: 16px;
-    height: 16px;
+    width: 18px;
+    height: 18px;
+    opacity: 1;
   }
 }
 </style>
