@@ -736,7 +736,8 @@ export default {
   width: 3px;
   background: #00d9e7;
   border-radius: 1px;
-  animation: sound 0.5s ease infinite;
+  animation: sound 0.8s ease-in-out infinite;
+  transition: height 0.3s ease, transform 0.3s ease;
 }
 
 .playing-indicator .bar:nth-child(1) {
@@ -746,12 +747,12 @@ export default {
 
 .playing-indicator .bar:nth-child(2) {
   height: 10px;
-  animation-delay: 0.15s;
+  animation-delay: 0.2s;
 }
 
 .playing-indicator .bar:nth-child(3) {
   height: 4px;
-  animation-delay: 0.3s;
+  animation-delay: 0.4s;
 }
 
 @keyframes sound {
@@ -759,13 +760,15 @@ export default {
     transform: scaleY(1);
   }
   50% {
-    transform: scaleY(0.5);
+    transform: scaleY(0.4);
   }
 }
 
-/* Пауза анимации когда плеер на паузе */
+/* Пауза анимации когда плеер на паузе - плавно уменьшаем столбики */
 .playing-indicator.paused .bar {
-  animation-play-state: paused;
+  animation: none;
+  height: 4px !important;
+  transform: scaleY(1) !important;
 }
 
 .track-info {

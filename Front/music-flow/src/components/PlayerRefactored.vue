@@ -177,7 +177,7 @@ export default {
         if (isTrackEnding) return;
         isTrackEnding = true;
 
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise(resolve => setTimeout(resolve, 300));
 
         if (Math.abs(this.currentAudio.currentTime - this.currentAudio.duration) < 1) {
           await this.sendNextTrack();
@@ -329,11 +329,10 @@ export default {
 
       this.nextTrackTimeout = setTimeout(async () => {
         if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-          this.sendPauseCommand();
           sendSocketMessage(this.socket, { type: 'next_track' });
         }
         this.nextTrackTimeout = null;
-      }, 300);
+      }, 200);
     },
 
     async sendPrevTrack() {
@@ -433,7 +432,16 @@ export default {
 
         case 'change_track':
           if (data.tracks && data.tracks.length > 0 && !this.isSyncing) {
-            await this.loadTrack(data.tracks[data.index]);
+            // Сохраняем состояние воспроизведения перед загрузкой
+            const shouldAutoPlay = this.isPlaying;
+            
+            await this.loadTrack(data.tracks[data.index], () => {
+              // Всегда начинаем воспроизведение при смене трека
+              // (пользователь либо нажал next, либо трек закончился)
+              this.currentAudio.currentTime = 0;
+              this.currentAudio.play().catch(e => console.log('Play error:', e));
+              this.isPlaying = true;
+            });
           }
           if (data.tracks) {
             this.updateTracksList(data.tracks, data.index);

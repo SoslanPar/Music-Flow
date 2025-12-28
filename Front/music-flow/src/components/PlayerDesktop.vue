@@ -32,7 +32,12 @@
           
           <Transition name="info-swap" mode="out-in">
             <div class="track-info" :key="title">
-              <h2 class="track-title">{{ title }}</h2>
+              <h2 class="track-title" :class="{ 'is-long': isLongTitle }">
+                <span class="track-title-inner">
+                  <span class="track-title-text">{{ title }}</span>
+                  <span v-if="isLongTitle" class="track-title-text">{{ title }}</span>
+                </span>
+              </h2>
               <p class="track-artist">{{ artist }}</p>
             </div>
           </Transition>
@@ -128,7 +133,7 @@
     <!-- Fullscreen Mode -->
     <Teleport to="body">
       <Transition name="fade-scale">
-        <div v-if="showFullscreen" class="fullscreen-player-overlay" @click.self="toggleFullscreen">
+        <div v-if="showFullscreen" class="fullscreen-player-overlay">
           <div class="fullscreen-player">
             <!-- Close button -->
             <button class="fs-close-btn" @click="toggleFullscreen">
@@ -154,7 +159,12 @@
             <!-- Track Info -->
             <Transition name="fs-info-swap" mode="out-in">
               <div class="fs-info" :key="title">
-                <h1 class="fs-title">{{ title }}</h1>
+                <h1 class="fs-title" :class="{ 'is-long': isLongTitle }">
+                  <span class="fs-title-inner">
+                    <span class="fs-title-text">{{ title }}</span>
+                    <span v-if="isLongTitle" class="fs-title-text">{{ title }}</span>
+                  </span>
+                </h1>
                 <p class="fs-artist">{{ artist }}</p>
               </div>
             </Transition>
@@ -271,6 +281,13 @@ export default {
     volumePercent() {
       if (this.isVolumeDragging) return this.dragVolume * 100;
       return (this.isMuted ? 0 : this.volume) * 100;
+    },
+    
+    /**
+     * Проверка длины названия - если больше 30 символов, включаем marquee
+     */
+    isLongTitle() {
+      return this.title && this.title.length > 30;
     },
     
     /**
@@ -404,7 +421,7 @@ export default {
       this.isVolumeDragging = false;
       document.removeEventListener('mousemove', this.handleVolumeDrag);
       document.removeEventListener('mouseup', this.stopVolumeDrag);
-    },
+    }
   },
   
   beforeUnmount() {
@@ -508,20 +525,44 @@ export default {
 
 .track-info {
   min-width: 0;
+  overflow: hidden;
 }
 
 .track-title {
   font-size: 14px;
   font-weight: 600;
-  background: linear-gradient(90deg, #D0BCFF, #00d9e7);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
   margin: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   cursor: default;
+}
+
+.track-title .track-title-text {
+  background: linear-gradient(90deg, #D0BCFF, #00d9e7);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Marquee анимация для длинных названий */
+.track-title.is-long {
+  text-overflow: clip;
+}
+
+.track-title.is-long .track-title-inner {
+  display: inline-flex;
+  animation: desktop-marquee 14s linear infinite;
+}
+
+.track-title.is-long .track-title-text {
+  flex-shrink: 0;
+  padding-right: 60px;
+}
+
+@keyframes desktop-marquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
 }
 
 .track-title:hover {
@@ -943,19 +984,43 @@ export default {
 .fs-info {
   text-align: center;
   width: 100%;
+  overflow: hidden;
 }
 
 .fs-title {
   font-size: 28px;
   font-weight: 700;
-  background: linear-gradient(90deg, #D0BCFF, #00d9e7);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
   margin: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.fs-title .fs-title-text {
+  background: linear-gradient(90deg, #D0BCFF, #00d9e7);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Marquee анимация для длинных названий */
+.fs-title.is-long {
+  text-overflow: clip;
+}
+
+.fs-title.is-long .fs-title-inner {
+  display: inline-flex;
+  animation: fs-marquee 16s linear infinite;
+}
+
+.fs-title.is-long .fs-title-text {
+  flex-shrink: 0;
+  padding-right: 100px;
+}
+
+@keyframes fs-marquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
 }
 
 .fs-artist {
@@ -1021,8 +1086,8 @@ export default {
 
 .fs-time-duration {
   font-size: 13px;
-  color: #633A89;
-  text-shadow: 0 0 8px rgba(99, 58, 137, 0.5);
+  color: #bf5af2;
+  text-shadow: 0 0 8px rgba(191, 90, 242, 0.5);
 }
 
 .fs-controls {
@@ -1181,6 +1246,13 @@ export default {
 @media (max-width: 768px) {
   .desktop-player {
     display: none; /* Hide on mobile, use PlayerMobile instead */
+  }
+}
+
+/* Hide desktop player on touch devices (mobile/tablet) regardless of screen size */
+@media (pointer: coarse) {
+  .desktop-player {
+    display: none !important;
   }
 }
 </style>

@@ -23,13 +23,30 @@
         <div v-if="showRoomsDropdown" class="rooms-dropdown">
           <div class="rooms-dropdown-header">
             <span>Ваши комнаты</span>
-            <button class="add-room-small-btn" @click.stop="showCreateRoomModal = true">
+            <button class="add-room-small-btn" @click.stop="openCreateRoomFromDropdown">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
               </svg>
             </button>
           </div>
-          <ul class="rooms-dropdown-list">
+          
+          <!-- Inline форма создания комнаты в dropdown -->
+          <div v-if="showDropdownCreateForm" class="dropdown-create-form">
+            <input 
+              v-model="newRoomNameDropdown" 
+              placeholder="Название комнаты"
+              class="dropdown-create-input"
+              @keyup.enter="createRoomFromDropdown"
+              @click.stop
+              ref="dropdownRoomInput"
+            />
+            <div class="dropdown-create-buttons">
+              <button class="dropdown-btn-cancel" @click.stop="showDropdownCreateForm = false">Отмена</button>
+              <button class="dropdown-btn-create" @click.stop="createRoomFromDropdown" :disabled="!newRoomNameDropdown.trim()">Создать</button>
+            </div>
+          </div>
+          
+          <ul v-if="!showDropdownCreateForm" class="rooms-dropdown-list">
             <li 
               v-for="room in rooms" 
               :key="room.id" 
@@ -107,7 +124,7 @@
         </div>
         
         <!-- Кнопка выхода в sidebar для мобильных -->
-        <div class="sidebar-section sidebar-leave-section">
+        <div class="sidebar-section sidebar-leave-section mobile-only">
           <button class="sidebar-leave-btn" @click="leaveRoom">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
               <path d="M10.09 15.59L11.5 17l5-5-5-5-1.41 1.41L12.67 11H3v2h9.67l-2.58 2.59zM19 3H5c-1.11 0-2 .9-2 2v4h2V5h14v14H5v-4H3v4c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/>
@@ -358,6 +375,8 @@ export default {
       showAccountMenu: false,
       showRoomsDropdown: false,
       showCreateRoomModal: false,
+      showDropdownCreateForm: false,
+      newRoomNameDropdown: '',
       loadingRooms: false,
       draggedRoom: null,
       // Player state
@@ -409,6 +428,36 @@ export default {
       }
       if (this.showRoomsDropdown && !e.target.closest('.rooms-menu-btn') && !e.target.closest('.rooms-dropdown')) {
         this.showRoomsDropdown = false;
+        this.showDropdownCreateForm = false;
+      }
+    },
+    
+    // Открытие формы создания комнаты из dropdown
+    openCreateRoomFromDropdown() {
+      this.showDropdownCreateForm = true;
+      this.newRoomNameDropdown = '';
+      this.$nextTick(() => {
+        this.$refs.dropdownRoomInput?.focus();
+      });
+    },
+    
+    // Создание комнаты из dropdown
+    async createRoomFromDropdown() {
+      const name = this.newRoomNameDropdown.trim();
+      if (!name) return;
+      
+      try {
+        const result = await roomsApi.createRoom(name);
+        if (Array.isArray(result) && result.length > 0) {
+          const newRoom = result[result.length - 1];
+          this.rooms.push({ id: newRoom.id, name: name, participants_count: 1 });
+          this.newRoomNameDropdown = '';
+          this.showDropdownCreateForm = false;
+          this.showRoomsDropdown = false;
+          this.joinRoom(newRoom.id);
+        }
+      } catch (error) {
+        console.error('Error creating room:', error);
       }
     },
     
@@ -542,7 +591,7 @@ export default {
       if (this.$refs.audioPlayer) {
         // Если кликнули на текущий трек - toggle play/pause
         if (index === this.currentTrackIndex) {
-          if (this.isPlaying) {
+          if (this.isPlayerPlaying) {
             this.$refs.audioPlayer.sendPauseCommand();
           } else {
             this.$refs.audioPlayer.sendPlayCommand();
@@ -765,6 +814,73 @@ export default {
   background: rgba(0, 217, 231, 0.3);
 }
 
+/* Dropdown create form */
+.dropdown-create-form {
+  padding: 12px;
+  border-bottom: 1px solid rgba(208, 188, 255, 0.1);
+}
+
+.dropdown-create-input {
+  width: 100%;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(208, 188, 255, 0.2);
+  border-radius: 8px;
+  color: white;
+  font-size: 13px;
+  outline: none;
+  margin-bottom: 10px;
+  box-sizing: border-box;
+}
+
+.dropdown-create-input:focus {
+  border-color: rgba(0, 217, 231, 0.5);
+}
+
+.dropdown-create-input::placeholder {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.dropdown-create-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.dropdown-btn-cancel,
+.dropdown-btn-create {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.dropdown-btn-cancel {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.dropdown-btn-cancel:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.dropdown-btn-create {
+  background: linear-gradient(135deg, #00d9e7 0%, #8b5cf6 100%);
+  border: none;
+  color: white;
+}
+
+.dropdown-btn-create:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.dropdown-btn-create:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .rooms-dropdown-list {
   list-style: none;
   margin: 0;
@@ -833,6 +949,17 @@ export default {
   display: block;
 }
 
+/* Show mobile elements on touch devices */
+@media (pointer: coarse) {
+  .mobile-only {
+    display: flex !important;
+  }
+  
+  .desktop-only {
+    display: none !important;
+  }
+}
+
 /* Hidden player (controls playback but not visible) */
 .hidden-player {
   position: absolute;
@@ -846,7 +973,8 @@ export default {
 /* Sidebar leave section */
 .sidebar-leave-section {
   margin-top: auto;
-  padding-top: 12px;
+  padding: 12px;
+  padding-bottom: 80px; /* Отступ для мобильного плеера */
   border-top: 1px solid rgba(208, 188, 255, 0.1);
 }
 
@@ -1025,6 +1153,7 @@ export default {
   overflow: hidden;
   transition: transform 0.3s ease, width 0.3s ease;
   height: 100%;
+  padding-bottom: 80px; /* Место для плеера */
 }
 
 .sidebar-section {
@@ -1522,7 +1651,7 @@ export default {
     left: 0;
     top: 56px;
     bottom: 0;
-    z-index: 1100; /* Above mobile player (z-index: 1000) */
+    z-index: 1100;
     transform: translateX(-100%);
     width: 280px;
     background: rgba(15, 12, 25, 0.98);
@@ -1532,6 +1661,8 @@ export default {
     transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     display: flex;
     flex-direction: column;
+    overflow-y: auto;
+    padding-bottom: 80px; /* Место для плеера */
   }
   
   .sidebar.sidebar-open {
@@ -1540,7 +1671,7 @@ export default {
   
   .sidebar-leave-section {
     padding: 16px;
-    padding-bottom: calc(80px + env(safe-area-inset-bottom, 16px)); /* Extra padding for player space */
+    margin-top: auto;
     background: rgba(15, 12, 25, 0.9);
   }
   
@@ -1574,6 +1705,18 @@ export default {
   }
   
   /* Кнопка выхода скрыта на мобильных - она в sidebar */
+  .leave-room-btn {
+    display: none !important;
+  }
+}
+
+/* Landscape orientation на мобильных */
+@media (orientation: landscape) and (pointer: coarse) and (max-height: 500px) {
+  .room-view {
+    padding-bottom: 20px;
+  }
+  
+  /* Кнопка выхода скрыта - есть в sidebar */
   .leave-room-btn {
     display: none !important;
   }

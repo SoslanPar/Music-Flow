@@ -25,8 +25,13 @@
             </div>
           </div>
           
-          <div class="mobile-info">
-            <div class="mobile-title">{{ title }}</div>
+          <div class="mobile-info" ref="mobileInfo">
+            <div class="mobile-title" :class="{ 'is-long': isLongTitle }">
+              <span class="mobile-title-inner">
+                <span class="mobile-title-text">{{ title }}</span>
+                <span v-if="isLongTitle" class="mobile-title-text">{{ title }}</span>
+              </span>
+            </div>
             <div class="mobile-artist">{{ artist }}</div>
           </div>
         </div>
@@ -93,7 +98,12 @@
           <div class="full-info">
             <Transition name="info-slide" mode="out-in">
               <div class="full-info-left" :key="title">
-                <h2 class="full-title">{{ title }}</h2>
+                <h2 class="full-title" :class="{ 'is-long': isLongTitle }">
+                  <span class="full-title-inner">
+                    <span class="full-title-text">{{ title }}</span>
+                    <span v-if="isLongTitle" class="full-title-text">{{ title }}</span>
+                  </span>
+                </h2>
                 <p class="full-artist">{{ artist }}</p>
               </div>
             </Transition>
@@ -191,6 +201,13 @@ export default {
       if (this.isDragging) return this.dragProgress;
       if (!this.duration) return 0;
       return (this.currentTime / this.duration) * 100;
+    },
+    
+    /**
+     * Проверка длины названия - если больше 25 символов, включаем marquee
+     */
+    isLongTitle() {
+      return this.title && this.title.length > 25;
     },
     
     /**
@@ -364,6 +381,7 @@ export default {
 .mobile-info {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
 }
 
 .mobile-title {
@@ -373,6 +391,27 @@ export default {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  position: relative;
+}
+
+/* Marquee анимация для длинных названий */
+.mobile-title.is-long {
+  text-overflow: clip;
+}
+
+.mobile-title.is-long .mobile-title-inner {
+  display: inline-flex;
+  animation: marquee-scroll 12s linear infinite;
+}
+
+.mobile-title.is-long .mobile-title-text {
+  flex-shrink: 0;
+  padding-right: 60px;
+}
+
+@keyframes marquee-scroll {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
 }
 
 .mobile-artist {
@@ -482,9 +521,10 @@ export default {
 }
 
 .playlist-name {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   color: white;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
 /* Cover */
@@ -560,19 +600,43 @@ export default {
 .full-info-left {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
 }
 
 .full-title {
   font-size: 22px;
   font-weight: 700;
-  background: linear-gradient(90deg, #D0BCFF, #00d9e7);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
   margin: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.full-title .full-title-text {
+  background: linear-gradient(90deg, #D0BCFF, #00d9e7);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Marquee анимация для длинных названий */
+.full-title.is-long {
+  text-overflow: clip;
+}
+
+.full-title.is-long .full-title-inner {
+  display: inline-flex;
+  animation: marquee-full 14s linear infinite;
+}
+
+.full-title.is-long .full-title-text {
+  flex-shrink: 0;
+  padding-right: 80px;
+}
+
+@keyframes marquee-full {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
 }
 
 .full-artist {
@@ -788,6 +852,196 @@ export default {
   .full-player {
     padding-top: max(16px, env(safe-area-inset-top));
     padding-bottom: max(16px, env(safe-area-inset-bottom));
+  }
+}
+
+/* ============ LANDSCAPE ORIENTATION FOR MOBILE ============ */
+/* Use pointer: coarse to detect touch devices (mobile) */
+@media (orientation: landscape) and (pointer: coarse) and (max-height: 500px) {
+  .full-player {
+    flex-direction: row;
+    flex-wrap: nowrap;
+    padding: 12px 24px;
+    gap: 40px;
+    overflow: hidden;
+    align-items: center;
+    justify-content: flex-start;
+  }
+  
+  .full-player-header {
+    position: absolute;
+    top: 8px;
+    left: 12px;
+    z-index: 10;
+    padding: 0;
+  }
+  
+  .header-btn {
+    padding: 4px;
+  }
+  
+  .header-btn svg {
+    width: 20px;
+    height: 20px;
+  }
+  
+  .header-title {
+    display: none;
+  }
+  
+  .header-btn-placeholder {
+    display: none;
+  }
+  
+  /* Left side - large cover */
+  .full-cover-wrapper {
+    flex: 0 0 auto;
+    width: auto;
+    max-width: none;
+    padding: 0;
+    margin-left: 0;
+    margin-top: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  
+  .full-cover {
+    max-width: none;
+    width: auto;
+    height: calc(100vh - 40px);
+    max-height: 300px;
+    aspect-ratio: 1/1;
+    border-radius: 12px;
+  }
+  
+  /* Right side container - стек: текст, таймбар, контролы */
+  
+  /* Track info - над прогрессом */
+  .full-info {
+    position: absolute;
+    top: 15%;
+    right: 24px;
+    left: calc(100vh - 40px + 64px);
+    padding: 0;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  
+  .full-info-left {
+    flex: 1;
+    min-width: 0;
+    text-align: center;
+  }
+  
+  .full-title {
+    font-size: 18px;
+    line-height: 1.3;
+  }
+  
+  .full-title.marquee span {
+    padding-right: 40px;
+  }
+  
+  .full-artist {
+    font-size: 13px;
+    margin-top: 4px;
+    opacity: 0.7;
+  }
+  
+  .like-btn-full {
+    display: none;
+  }
+  
+  /* Progress bar - под текстом */
+  .full-progress {
+    position: absolute;
+    top: 48%;
+    right: 24px;
+    left: calc(100vh - 40px + 64px);
+    transform: translateY(-50%);
+    padding: 0;
+  }
+  
+  .progress-track {
+    height: 5px;
+    border-radius: 3px;
+  }
+  
+  .progress-thumb {
+    width: 14px;
+    height: 14px;
+  }
+  
+  .progress-times {
+    margin-top: 6px;
+    font-size: 11px;
+  }
+  
+  /* Controls - внизу */
+  .full-controls {
+    position: absolute;
+    top: 78%;
+    right: 24px;
+    left: calc(100vh - 40px + 64px);
+    transform: translateY(-50%);
+    padding: 0;
+    gap: 20px;
+    flex-direction: row;
+    justify-content: center;
+    align-items: center;
+  }
+  
+  .control-btn {
+    padding: 4px;
+  }
+  
+  .prev-btn,
+  .next-btn {
+    width: 44px;
+    height: 44px;
+  }
+  
+  .prev-btn svg,
+  .next-btn svg {
+    width: 30px;
+    height: 30px;
+  }
+  
+  .play-btn-main {
+    width: 60px;
+    height: 60px;
+  }
+  
+  .play-btn-main svg {
+    width: 28px;
+    height: 28px;
+  }
+  
+  .full-bottom {
+    display: none;
+  }
+}
+
+/* Mini player landscape */
+@media (orientation: landscape) and (pointer: coarse) and (max-height: 500px) {
+  .mobile-player-content {
+    padding: 4px 16px 8px;
+  }
+  
+  .mobile-cover {
+    width: 40px;
+    height: 40px;
+  }
+  
+  .mobile-title {
+    font-size: 13px;
+  }
+  
+  .mobile-artist {
+    font-size: 11px;
   }
 }
 </style>
