@@ -122,6 +122,12 @@
             </li>
           </ul>
         </div>
+      <button v-if="connected" class="leave-room-btn desktop-only" @click="leaveRoom">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M10.09 15.59L11.5 17l5-5-5-5-1.41 1.41L12.67 11H3v2h9.67l-2.58 2.59zM19 3H5c-1.11 0-2 .9-2 2v4h2V5h14v14H5v-4H3v4c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/>
+        </svg>
+        <span>Выйти из комнаты</span>
+      </button>
         
         <!-- Кнопка выхода в sidebar для мобильных -->
         <div class="sidebar-section sidebar-leave-section mobile-only">
@@ -131,6 +137,8 @@
             </svg>
             <span>Выйти из комнаты</span>
           </button>
+
+          
         </div>
       </aside>
 
@@ -314,12 +322,7 @@
     />
 
     <!-- Кнопка выхода из комнаты (только на десктопе) -->
-    <button v-if="connected" class="leave-room-btn desktop-only" @click="leaveRoom">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M10.09 15.59L11.5 17l5-5-5-5-1.41 1.41L12.67 11H3v2h9.67l-2.58 2.59zM19 3H5c-1.11 0-2 .9-2 2v4h2V5h14v14H5v-4H3v4c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/>
-      </svg>
-      <span>Выйти из комнаты</span>
-    </button>
+
     
     <!-- Overlay для sidebar на мобильных -->
     <div 
@@ -581,9 +584,9 @@ export default {
       this.tracks = newTracks;
       this.currentTrackIndex = updatedIndex;
       
-      // Отправляем на сервер
+      // Отправляем на сервер с индексами для синхронизации
       if (this.$refs.audioPlayer) {
-        this.$refs.audioPlayer.sendReorderTracks(newTracks, updatedIndex);
+        this.$refs.audioPlayer.sendReorderTracks(newTracks, updatedIndex, oldIndex, newIndex);
       }
     },
     
@@ -681,28 +684,10 @@ export default {
     async onDeleteTrack(index) {
       if (index < 0 || index >= this.tracks.length) return;
       
-      // Создаём новый список без удалённого трека
-      const newTracks = [...this.tracks];
-      newTracks.splice(index, 1);
-      
-      // Корректируем currentTrackIndex
-      let newCurrentIndex = this.currentTrackIndex;
-      if (index < this.currentTrackIndex) {
-        newCurrentIndex = this.currentTrackIndex - 1;
-      } else if (index === this.currentTrackIndex) {
-        // Если удаляем текущий трек, переключаемся на следующий (или предыдущий если в конце)
-        if (newCurrentIndex >= newTracks.length) {
-          newCurrentIndex = Math.max(0, newTracks.length - 1);
-        }
-      }
-      
-      // Обновляем локальное состояние
-      this.tracks = newTracks;
-      this.currentTrackIndex = newCurrentIndex;
-      
-      // Отправляем обновление на бекенд
+      // Отправляем запрос на удаление на сервер
+      // Сервер обновит список и разошлёт всем участникам
       if (this.$refs.audioPlayer) {
-        this.$refs.audioPlayer.sendReorderTracks(newTracks, newCurrentIndex);
+        this.$refs.audioPlayer.removeTrack(index);
       }
     }
   }
@@ -983,7 +968,7 @@ export default {
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 12px 14px;
+  padding: 12px 10px;
   background: rgba(255, 100, 100, 0.1);
   border: 1px solid rgba(255, 100, 100, 0.2);
   border-radius: 10px;
@@ -1153,11 +1138,11 @@ export default {
   overflow: hidden;
   transition: transform 0.3s ease, width 0.3s ease;
   height: 100%;
-  padding-bottom: 80px; /* Место для плеера */
+  padding-bottom: 50px; /* Место для плеера */
 }
 
 .sidebar-section {
-  padding: 12px;
+  padding: 10px;
   flex-shrink: 0;
 }
 
@@ -1211,7 +1196,6 @@ export default {
 
 .sidebar-header.clickable {
   cursor: pointer;
-  transition: background 0.2s;
 }
 
 .sidebar-header.clickable:hover {
@@ -1588,17 +1572,18 @@ export default {
 /* Leave Button (desktop only) */
 .leave-room-btn {
   position: fixed;
-  bottom: 100px; /* Above desktop player */
-  left: 16px;
+  bottom: 110px; /* Above desktop player */
+  /* left: 16px; */
+  align-self: center;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   padding: 10px 16px;
   background: rgba(255, 100, 100, 0.1);
   border: 1px solid rgba(255, 100, 100, 0.3);
-  border-radius: 20px;
+  border-radius: 10px;
   color: #ff8a8a;
-  font-size: 13px;
+  font-size: 15px;
   cursor: pointer;
   transition: all 0.2s;
   z-index: 100;
@@ -1713,7 +1698,7 @@ export default {
 /* Landscape orientation на мобильных */
 @media (orientation: landscape) and (pointer: coarse) and (max-height: 500px) {
   .room-view {
-    padding-bottom: 20px;
+    padding-bottom: 60px;
   }
   
   /* Кнопка выхода скрыта - есть в sidebar */

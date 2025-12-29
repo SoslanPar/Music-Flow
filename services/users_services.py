@@ -15,7 +15,7 @@ import jwt
 import secrets
 import httpx
 
-from hashlib import sha256
+from passlib.hash import bcrypt
 from fastapi import HTTPException
 
 
@@ -31,9 +31,16 @@ class UserServices:
         return token    
 
 
-    async def hash_password(self, password):
-        hashed_password = sha256(password.encode()).hexdigest()
-        return hashed_password
+    def hash_password(self, password: str) -> str:
+        """Хеширует пароль с использованием bcrypt"""
+        return bcrypt.hash(password)
+    
+    def verify_password(self, plain_password: str, hashed_password: str) -> bool:
+        """Проверяет пароль против хеша bcrypt"""
+        try:
+            return bcrypt.verify(plain_password, hashed_password)
+        except Exception:
+            return False
 
     async def get_all(self):
         async with self.db.session_factory() as session:
@@ -51,37 +58,56 @@ class UserServices:
             print(result)
             return result
         
-    async def create_new_user(self, email: EmailStr, password: str, username: str, birthday: str, rooms_list: list = [], yandex_token: str = None):
+    async def create_new_user(self, email: str, password: str, username: str, birthday: str = None, rooms_list: list = None, yandex_token: str = None):
+        """Создаёт нового пользователя с безопасным хешированием пароля"""
         async with self.db.session_factory() as session:
-            hashed_password =  await self.hash_password(password)
+            # Проверяем, существует ли пользователь с таким email или username
+            existing = await session.execute(
+                select(Users).where(
+                    or_(Users.email == email, Users.username == username)
+                )
+            )
+            if existing.scalar_one_or_none():
+                raise HTTPException(status_code=400, detail="Пользователь с таким email или username уже существует")
+            
+            hashed_password = self.hash_password(password)
             new_user = Users(
                 email=email,
                 hashed_password=hashed_password,
                 username=username,
-                birthday=birthday,
-                rooms_list=rooms_list,
+                birthday=birthday or "",
+                rooms_list=rooms_list or [],
                 yandex_token=yandex_token
             )
-            # new_user_friends = 
-
-        session.add(new_user)
-        await session.commit()
-
-        return {'Status': 'Successfully', 'user_id': str(new_user.id)}
+            
+            session.add(new_user)
+            await session.commit()
+            await session.refresh(new_user)  # Обновляем объект для получения ID
+            
+            return {'status': 'success', 'user_id': str(new_user.id), 'username': new_user.username}
     
-    async def logging(self, obj: dict):
+    async def login(self, nickname: str, password: str):
+        """Авторизация пользователя с проверкой bcrypt хеша"""
         async with self.db.session_factory() as session:
-            print(obj)
-            if 'yandex_token' in obj:
-                result = await session.execute(select(Users).where(Users.yandex_token == obj['yandex_token']))
-            else:
-                result = await session.execute(select(Users).where(and_(or_(Users.email == obj['nickname'],Users.username == obj['nickname']), 
-                                                                   Users.hashed_password == obj['hashed_password'])))
+            # Ищем пользователя по email или username
+            result = await session.execute(
+                select(Users).where(
+                    or_(Users.email == nickname, Users.username == nickname)
+                )
+            )
             user = result.scalar_one_or_none()
-
-            if user:
+            
+            if user and self.verify_password(password, user.hashed_password):
                 return user
             return None
+    
+    async def login_by_yandex_token(self, yandex_token: str):
+        """Авторизация по Яндекс токену"""
+        async with self.db.session_factory() as session:
+            result = await session.execute(
+                select(Users).where(Users.yandex_token == yandex_token)
+            )
+            return result.scalar_one_or_none()
         
     async def add_room(self, room_id: str, user_id: str):
         async with self.db.session_factory() as session:

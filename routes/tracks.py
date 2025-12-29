@@ -1,13 +1,20 @@
 import json
 import os
 import asyncio
+import time
 import httpx
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import (JSONResponse, StreamingResponse)
+from fastapi import APIRouter, HTTPException, Request, Query
+from fastapi.responses import JSONResponse, StreamingResponse, Response
 from yandex_music import Client
-from aiocache import cached, Cache
+from aiocache import Cache
 from aiocache.serializers import JsonSerializer
 from services.users_services import UserServices
+from services.stream_service import (
+    generate_stream_token, 
+    verify_stream_token, 
+    register_stream, 
+    unregister_stream
+)
 from db.base import Database
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor
@@ -22,91 +29,270 @@ router = APIRouter(prefix="/tracks")
 # Пул потоков для синхронных операций
 executor = ThreadPoolExecutor(max_workers=10)
 
-# Кэш для метаданных треков
-track_cache = Cache(Cache.MEMORY, serializer=JsonSerializer())
+# Кэши для треков и метаданных
+track_object_cache = {}  # In-memory кэш для объектов треков (не сериализуемые)
+track_meta_cache = Cache(Cache.MEMORY, serializer=JsonSerializer())  # Кэш для сериализуемых метаданных
+
+# Кэш для прямых ссылок на треки (увеличен TTL)
+direct_link_cache = {}
+DIRECT_LINK_TTL = 180  # 3 минуты (ссылки Yandex живут ~5 минут)
+
+# TTL для кэша объектов треков (10 минут)
+TRACK_CACHE_TTL = 600
+
+# Глобальный клиент (переиспользуется для скорости)
+_yandex_client = None
+
+def get_yandex_client(token: str = None):
+    """Получить или создать клиент Yandex Music"""
+    global _yandex_client
+    if _yandex_client is None:
+        _yandex_client = Client(token or OAUTH_TOKEN).init()
+    return _yandex_client
 
 
-def _get_track_sync(track_id: str, token: str) -> tuple:
-    """Синхронное получение трека"""
-    client = Client(token).init()
+def _get_track_sync(track_id: str, token: str):
+    """Синхронное получение трека из Yandex Music API"""
+    client = get_yandex_client(token)
     track = client.tracks(track_id)[0]
     return track
 
 
+def _get_download_info_sync(track, get_direct: bool = True):
+    """Синхронное получение информации о загрузке"""
+    return track.get_download_info(get_direct_links=get_direct)[0]
+
+
 async def get_track_cached(track_id: str, token: str):
-    """Получение трека с кэшированием"""
-    cache_key = f"track:{track_id}"
+    """
+    Получение трека с кэшированием.
+    Объекты Track не сериализуемы, поэтому храним их в простом dict.
+    """
+    import time
+    cache_key = f"track:{track_id}:{token}"
+    current_time = time.time()
     
-    # Кэшируем только метаданные, не объект
-    cached_meta = await track_cache.get(cache_key)
+    # Проверяем кэш объектов
+    if cache_key in track_object_cache:
+        cached_data = track_object_cache[cache_key]
+        if current_time - cached_data["timestamp"] < TRACK_CACHE_TTL:
+            return cached_data["track"]
+        else:
+            # Удаляем устаревший кэш
+            del track_object_cache[cache_key]
     
+    # Получаем трек из API
     loop = asyncio.get_event_loop()
     track = await loop.run_in_executor(executor, _get_track_sync, track_id, token)
+    
+    # Сохраняем в кэш
+    track_object_cache[cache_key] = {
+        "track": track,
+        "timestamp": current_time
+    }
     
     return track
 
 
+async def get_track_metadata_cached(track_id: str, token: str) -> dict:
+    """
+    Получение метаданных трека с кэшированием.
+    Возвращает сериализуемый словарь.
+    """
+    cache_key = f"track_meta:{track_id}"
+    
+    # Проверяем кэш метаданных
+    cached_meta = await track_meta_cache.get(cache_key)
+    if cached_meta:
+        return cached_meta
+    
+    # Получаем трек
+    track = await get_track_cached(track_id, token)
+    
+    # Формируем метаданные
+    metadata = {
+        "title": track.title,
+        "artist": ", ".join(artist.name for artist in track.artists),
+        "cover": f"https://{track.cover_uri.replace('%%', '400x400')}" if track.cover_uri else None,
+        "duration": track.duration_ms / 1000 if track.duration_ms else None,
+    }
+    
+    # Кэшируем на 10 минут
+    await track_meta_cache.set(cache_key, metadata, ttl=600)
+    
+    return metadata
+
+
 @router.get("/track_info")
 async def get_track_info(url: str, user_id: str, request: Request):
+    """Получить информацию о треке по URL"""
     try:
         user_model = UserServices(db)
         yan_tok = await user_model.get_yandex_token_by_user_id(user_id=user_id)
         
         track_id = url.split('track/')[1].split('/')[0] if 'track/' in url else url
-        track = await get_track_cached(track_id, yan_tok or OAUTH_TOKEN)
+        
+        # Используем кэшированные метаданные
+        metadata = await get_track_metadata_cached(track_id, yan_tok or OAUTH_TOKEN)
 
-        return {
-            "title": track.title,
-            "artist": ", ".join(artist.name for artist in track.artists),
-            "cover": f"https://{track.cover_uri.replace('%%', '400x400')}",
-        }
+        return metadata
     except Exception as e:
         print(f"Error in get_track_info: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
     
 
 @router.get("/track_and_stream")
-async def track_and_stream(url: str, user_id: str):
+async def track_and_stream(url: str, user_id: str, room_id: str = "default"):
+    """
+    Получить информацию о треке и прямую ссылку для стриминга.
+    Прямая ссылка Yandex обеспечивает быструю загрузку без проксирования.
+    """
     try:
         clean_url = url.split("?")[0]
         track_id = clean_url.split("track/")[1].split("/")[0]
         
-        # Проверяем кэш метаданных
-        cache_key = f"track_meta:{track_id}"
-        cached_info = await track_cache.get(cache_key)
+        # Параллельно получаем метаданные и прямую ссылку
+        metadata_task = get_track_metadata_cached(track_id, OAUTH_TOKEN)
+        direct_link_task = _get_direct_link_cached(track_id)
         
-        if cached_info:
-            return JSONResponse(cached_info)
-
-        track = await get_track_cached(track_id, OAUTH_TOKEN)
-        
-        # Получаем прямую ссылку в отдельном потоке
-        loop = asyncio.get_event_loop()
-        download_info = await loop.run_in_executor(
-            executor, 
-            lambda: track.get_download_info(get_direct_links=True)[0]
+        metadata, (direct_url, mime_type) = await asyncio.gather(
+            metadata_task, 
+            direct_link_task
         )
-
-        duration_sec = track.duration_ms / 1000 if track.duration_ms else None
-        track_info = {
-            "title": track.title,
-            "artist": ", ".join(artist.name for artist in track.artists),
-            "cover": f"https://{track.cover_uri.replace('%%', '400x400')}",
-            "stream_url": f"/stream?url={url}&user_id={user_id}",
-            "duration": duration_sec,
-        }
         
-        # Кэшируем на 2 минуты
-        await track_cache.set(cache_key, track_info, ttl=120)
+        track_info = {
+            **metadata,
+            "stream_url": direct_url,  # Прямая ссылка Yandex для быстрой загрузки
+            "track_id": track_id,
+            "mime_type": mime_type,
+        }
 
         return JSONResponse(track_info)
     except Exception as e:
         print(f"Error in track_and_stream: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
-    
 
+
+async def _get_direct_link_cached(track_id: str) -> tuple[str, str]:
+    """
+    Получение прямой ссылки на трек с кэшированием.
+    Возвращает (stream_url, mime_type)
+    """
+    current_time = time.time()
+    cache_key = f"direct:{track_id}"
+    
+    # Проверяем кэш
+    if cache_key in direct_link_cache:
+        cached = direct_link_cache[cache_key]
+        if current_time - cached["timestamp"] < DIRECT_LINK_TTL:
+            return cached["url"], cached["mime_type"]
+    
+    # Получаем трек
+    track = await get_track_cached(track_id, OAUTH_TOKEN)
+    
+    # Получаем прямую ссылку
+    loop = asyncio.get_event_loop()
+    download_info = await loop.run_in_executor(
+        executor, _get_download_info_sync, track, True
+    )
+    stream_url = await loop.run_in_executor(executor, download_info.get_direct_link)
+    
+    mime_type = {
+        "mp3": "audio/mpeg",
+        "aac": "audio/aac",
+        "flac": "audio/flac",
+    }.get(download_info.codec, "audio/mpeg")
+    
+    # Кэшируем
+    direct_link_cache[cache_key] = {
+        "url": stream_url,
+        "mime_type": mime_type,
+        "timestamp": current_time
+    }
+    
+    return stream_url, mime_type
+
+
+@router.get("/stream/{token}")
+async def stream_audio_secure(token: str, request: Request):
+    """
+    Защищённый стриминг аудио по токену.
+    Токен содержит track_id, user_id, room_id и подпись.
+    """
+    # Верифицируем токен
+    stream_token = verify_stream_token(token)
+    if not stream_token:
+        raise HTTPException(status_code=403, detail="Invalid or expired stream token")
+    
+    try:
+        track_id = stream_token.track_id
+        
+        # Регистрируем активный стрим
+        register_stream(token, track_id, stream_token.user_id)
+        
+        # Получаем прямую ссылку (из кэша или API)
+        stream_url, mime_type = await _get_direct_link_cached(track_id)
+        
+        # Получаем метаданные для заголовков
+        metadata = await get_track_metadata_cached(track_id, OAUTH_TOKEN)
+        duration_sec = metadata.get("duration")
+
+        # Получаем Content-Length
+        content_length = None
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+            try:
+                head_response = await client.head(stream_url, follow_redirects=True)
+                content_length = head_response.headers.get("content-length")
+            except Exception as e:
+                print(f"Error getting content length: {e}")
+
+        if not content_length and duration_sec:
+            content_length = str(int(duration_sec * 16000))
+
+        response_headers = {
+            "Content-Type": mime_type,
+            "Content-Disposition": "inline",
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "no-store, no-cache, must-revalidate",  # Запрещаем кэширование в браузере
+            "Accept-Ranges": "bytes",
+            "X-Stream-Token": "valid",  # Индикатор валидного токена
+        }
+
+        if content_length:
+            response_headers["Content-Length"] = content_length
+
+        async def generate():
+            try:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(None), follow_redirects=True) as client:
+                    async with client.stream("GET", stream_url) as response:
+                        if response.status_code != 200:
+                            return
+                        
+                        # Используем небольшие чанки для быстрого старта
+                        async for chunk in response.aiter_bytes(chunk_size=32 * 1024):
+                            if await request.is_disconnected():
+                                break
+                            yield chunk
+            finally:
+                # Удаляем стрим из активных при завершении
+                unregister_stream(token)
+
+        return StreamingResponse(
+            generate(),
+            media_type=mime_type,
+            headers=response_headers
+        )
+
+    except Exception as e:
+        unregister_stream(token)
+        print(f"Secure stream error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Streaming failed: {str(e)}")
+
+
+# Оставляем старый эндпоинт для обратной совместимости, но помечаем как deprecated
 @router.get("/stream")
 async def stream_audio(url: str, request: Request, user_id: str):
+    """Стриминг аудио трека"""
     try:
         if "music.yandex.ru" not in url or "track/" not in url:
             raise HTTPException(status_code=400, detail="Invalid track URL. Must be a Yandex Music track URL")
@@ -114,14 +300,14 @@ async def stream_audio(url: str, request: Request, user_id: str):
         clean_url = url.split("?")[0]
         track_id = clean_url.split("track/")[1].split("/")[0]
 
-        # Получаем трек
+        # Получаем трек (из кэша или API)
         track = await get_track_cached(track_id, OAUTH_TOKEN)
         
         # Получаем прямую ссылку в отдельном потоке
         loop = asyncio.get_event_loop()
         download_info = await loop.run_in_executor(
             executor, 
-            lambda: track.get_download_info(get_direct_links=True)[0]
+            _get_download_info_sync, track, True
         )
         stream_url = await loop.run_in_executor(executor, download_info.get_direct_link)
 
@@ -132,14 +318,15 @@ async def stream_audio(url: str, request: Request, user_id: str):
             "flac": "audio/flac",
         }.get(download_info.codec, "audio/mpeg")
 
-        # Получаем длительность трека в секундах
-        duration_sec = track.duration_ms / 1000 if track.duration_ms else None
+        # Используем кэшированные метаданные
+        metadata = await get_track_metadata_cached(track_id, OAUTH_TOKEN)
+        duration_sec = metadata.get("duration")
 
-        # Получаем Content-Length
+        # Получаем Content-Length с таймаутом
         content_length = None
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
             try:
-                head_response = await client.head(stream_url, follow_redirects=True, timeout=5.0)
+                head_response = await client.head(stream_url, follow_redirects=True)
                 content_length = head_response.headers.get("content-length")
             except Exception as e:
                 print(f"Error getting content length: {e}")
@@ -148,31 +335,24 @@ async def stream_audio(url: str, request: Request, user_id: str):
         if not content_length and duration_sec:
             content_length = str(int(duration_sec * 16000))
 
-        track_info = {
-            "title": track.title,
-            "artist": ", ".join(artist.name for artist in track.artists),
-            "cover": f"https://{track.cover_uri.replace('%%', '400x400')}",
-            "duration": duration_sec,
-        }
-
         response_headers = {
             "Content-Type": mime_type,
             "Content-Disposition": "inline",
             "X-Content-Type-Options": "nosniff",
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Expose-Headers": "Track-Info, Content-Duration",
-            "Track-Info": json.dumps(track_info),
+            "Track-Info": json.dumps(metadata),
             "Content-Duration": str(duration_sec) if duration_sec else "0",
-            "Cache-Control": "public, max-age=3600",  # Кэширование на 1 час
+            "Cache-Control": "public, max-age=3600",
             "Accept-Ranges": "bytes",
         }
 
         if content_length:
             response_headers["Content-Length"] = content_length
 
-        # Асинхронный генератор с увеличенным буфером
+        # Асинхронный генератор с оптимальным размером чанка
         async def generate():
-            async with httpx.AsyncClient(timeout=None, follow_redirects=True) as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(None), follow_redirects=True) as client:
                 async with client.stream("GET", stream_url) as response:
                     if response.status_code != 200:
                         raise HTTPException(
@@ -180,8 +360,8 @@ async def stream_audio(url: str, request: Request, user_id: str):
                             detail=f"Upstream error: {response.status_code}"
                         )
                     
-                    # Увеличенный размер чанка для лучшей производительности
-                    async for chunk in response.aiter_bytes(chunk_size=512 * 1024):
+                    # Оптимальный размер чанка (64KB - баланс между задержкой и производительностью)
+                    async for chunk in response.aiter_bytes(chunk_size=64 * 1024):
                         if await request.is_disconnected():
                             break
                         yield chunk

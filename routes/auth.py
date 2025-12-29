@@ -1,8 +1,10 @@
 import json
 import os
-import requests
+import secrets
+import httpx
 from fastapi import APIRouter, HTTPException, Request, Response, Depends, Cookie
-from fastapi.responses import (JSONResponse, Response)
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, EmailStr, Field
 from services.users_services import UserServices
 from db.base import Database
 from models.Users import Users
@@ -18,9 +20,34 @@ db = Database()
 router = APIRouter(prefix="/auth")
 
 
-async def get_access_token(code: str):
+# ============ Pydantic Models ============
+
+class SignInRequest(BaseModel):
+    """Модель запроса на вход"""
+    nickname: str = Field(..., min_length=1, max_length=100, description="Email или username")
+    password: str = Field(..., min_length=4, max_length=100, description="Пароль")
+
+
+class SignUpRequest(BaseModel):
+    """Модель запроса на регистрацию"""
+    email: EmailStr = Field(..., description="Email пользователя")
+    username: str = Field(..., min_length=3, max_length=50, description="Имя пользователя")
+    password: str = Field(..., min_length=6, max_length=100, description="Пароль (минимум 6 символов)")
+    birthday: str | None = Field(default=None, description="Дата рождения")
+
+
+class AuthResponse(BaseModel):
+    """Модель ответа авторизации"""
+    status: str
+    user_id: str
+    username: str
+    action: str
+    success: bool
+
+
+async def get_access_token(code: str) -> str:
     """
-    Обмен кода авторизации на токен доступа.
+    Обмен кода авторизации на токен доступа (асинхронно через httpx).
     """
     token_url = "https://oauth.yandex.ru/token"
     data = {
@@ -29,11 +56,12 @@ async def get_access_token(code: str):
         "client_id": CLIENT_ID,
         "client_secret": CLIENT_SECRET,
     }
-    response = requests.post(token_url, data=data)
-    if response.status_code != 200:
-        raise HTTPException(status_code=400, detail="Ошибка при получении токена")
-    print(response.json())
-    return response.json().get("access_token")
+    
+    async with httpx.AsyncClient() as client:
+        response = await client.post(token_url, data=data)
+        if response.status_code != 200:
+            raise HTTPException(status_code=400, detail="Ошибка при получении токена Яндекса")
+        return response.json().get("access_token")
 
 
 @router.get("/get_cookie")
@@ -47,6 +75,7 @@ async def get_cookie(request: Request):
 
 @router.get("/current-user")
 async def get_current_user(user_id: str = Cookie(None)):
+    """Получить текущего авторизованного пользователя"""
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
@@ -55,102 +84,122 @@ async def get_current_user(user_id: str = Cookie(None)):
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
-        return {"id": user.id, "username": user.username}
+        return {"id": str(user.id), "username": user.username}
     
 
-@router.get("/sign-in")
-async def auth_login(
-    request: Request,
-    response: Response,
-    nickname: str,
-    hashed_password: str,
-    db: Database = Depends(Database),
-):
+@router.post("/sign-in", response_model=AuthResponse)
+async def auth_login(credentials: SignInRequest):
+    """
+    Вход в систему по email/username и паролю.
+    Пароль хешируется на сервере с использованием bcrypt.
+    """
     try:
-        obj = {"nickname": nickname, "hashed_password": hashed_password}
-
-        user_model = UserServices(db)
-
-        user = await user_model.logging(obj)
+        user_services = UserServices(db)
+        user = await user_services.login(credentials.nickname, credentials.password)
 
         if user:
-            # token = await token_model.new_token(obj=obj, user_id=user.id)
-            usr_id = user.id
-            response = JSONResponse(
-                content=json.dumps(
-                    {"status": "Successfully", "user_id": str(usr_id)}
-                ),
-                status_code=200,
+            return AuthResponse(
+                status="authenticated",
+                user_id=str(user.id),
+                username=user.username,
+                action="login",
+                success=True
             )
-            return response
-        return {"status": "error", "message": "Неправильный логин или пароль"}
+        
+        raise HTTPException(status_code=401, detail="Неправильный логин или пароль")
+    except HTTPException:
+        raise
     except Exception as e:
-        print(e)
-        return {"message": str(e)}
+        raise HTTPException(status_code=500, detail=f"Ошибка авторизации: {str(e)}")
+
+
+@router.post("/sign-up", response_model=AuthResponse)
+async def auth_register(credentials: SignUpRequest):
+    """
+    Регистрация нового пользователя.
+    Пароль хешируется на сервере с использованием bcrypt.
+    """
+    try:
+        user_services = UserServices(db)
+        
+        result = await user_services.create_new_user(
+            email=credentials.email,
+            password=credentials.password,
+            username=credentials.username,
+            birthday=credentials.birthday,
+            rooms_list=[],
+            yandex_token=None
+        )
+        
+        return AuthResponse(
+            status="registered",
+            user_id=result["user_id"],
+            username=result["username"],
+            action="register",
+            success=True
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка регистрации: {str(e)}")
     
 
 @router.get("/check_token")
-async def check_token(code: str, db: Database = Depends(Database)):
+async def check_token(code: str):
+    """
+    Авторизация через Яндекс OAuth.
+    Если пользователь существует - логиним, иначе создаём нового.
+    """
     try:
-        # 1. Проверяем токен в БД
         user_services = UserServices(db)
         token = await get_access_token(code)
-        print("TOKEN:", token)
+        
+        # Проверяем, есть ли пользователь с таким токеном
         existing_user = await user_services.check_yandex_token(token)
-        print(existing_user)
+        
         if existing_user:
-            print("SEND success")
-            response_data = {
-                "status": "authenticated",
-                "user_id": str(existing_user.id),
-                "username": existing_user.username,
-                "action": "login",
-                "success": True,
-            }
-            return JSONResponse(
-                content=response_data,
-                headers={
-                    "Access-Control-Allow-Origin": DOMAIN,  
-                },
+            return AuthResponse(
+                status="authenticated",
+                user_id=str(existing_user.id),
+                username=existing_user.username,
+                action="login",
+                success=True
             )
 
-        try:
-            profile = await user_services.get_yandex_profile(token)
-            login = profile.get("login")
-            email = profile.get("default_email", "None")
-            birthday = profile.get("birthday", "None")
-            # Проверки на пустые поля
-            email = email if email else None
-            login = login if login else None
-            birthday = birthday if birthday else "hui"
-            if not login:
-                raise HTTPException(
-                    status_code=400, detail="Не удалось получить логин Яндекса"
-                )
+        # Получаем профиль из Яндекса и создаём нового пользователя
+        profile = await user_services.get_yandex_profile(token)
+        login = profile.get("login")
+        email = profile.get("default_email")
+        birthday = profile.get("birthday")
+        
+        if not login:
+            raise HTTPException(status_code=400, detail="Не удалось получить логин Яндекса")
+        
+        if not email:
+            # Генерируем уникальный email если его нет
+            email = f"{login}@yandex.ru"
 
-            new_user = await user_services.create_new_user(
-                email=email,
-                password="12345",
-                username=login,
-                birthday=birthday,
-                yandex_token=token,
-                rooms_list=[],
-            )
+        # Генерируем безопасный случайный пароль для Яндекс-пользователей
+        random_password = secrets.token_urlsafe(32)
 
-            return JSONResponse(
-                {
-                    "status": "registered",
-                    "user_id": str(new_user["user_id"]),
-                    "username": login,
-                    "action": "register",
-                    "success": True,
-                }
-            )
-        except Exception as e:
-            print(str(e))
+        new_user = await user_services.create_new_user(
+            email=email,
+            password=random_password,  # Безопасный случайный пароль
+            username=login,
+            birthday=birthday,
+            yandex_token=token,
+            rooms_list=[],
+        )
+
+        return AuthResponse(
+            status="registered",
+            user_id=new_user["user_id"],
+            username=new_user["username"],
+            action="register",
+            success=True
+        )
 
     except HTTPException:
         raise
     except Exception as e:
-        print(str(e))
-        raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера")
+        raise HTTPException(status_code=500, detail=f"Внутренняя ошибка сервера: {str(e)}")

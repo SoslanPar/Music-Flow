@@ -15,11 +15,12 @@ export default defineConfig(({ mode }) => {
       },
     },
     server: {
-      port: 443,
-      https: true,
+      port: 3000,
+      host: "127.0.0.1",
+      https: false,
       strictPort: true,
       hmr: { protocol: 'wss' },
-      allowedHosts: [DOMAIN],
+      allowedHosts: [DOMAIN, '.serveousercontent.com'],
       proxy: {
         '/api': {
           target: 'http://localhost:8000',

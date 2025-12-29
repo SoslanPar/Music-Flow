@@ -26,19 +26,84 @@ OAUTH_TOKEN = os.getenv("OAUTH_TOKEN")
 # Пул потоков для синхронных операций Yandex Music API
 executor = ThreadPoolExecutor(max_workers=10)
 
-# Кэш для информации о треках (TTL 5 минут)
+# Кэш для информации о треках (TTL 10 минут) - увеличен для производительности
 track_info_cache = Cache(Cache.MEMORY, serializer=JsonSerializer())
+
+# Глобальный клиент Yandex Music (переиспользуется)
+_yandex_client = None
+
+def get_yandex_client():
+    """Получить или создать клиент Yandex Music"""
+    global _yandex_client
+    if _yandex_client is None:
+        _yandex_client = Client(OAUTH_TOKEN).init()
+    return _yandex_client
+
+
+def _get_tracks_batch_sync(track_ids: list, client: Client) -> list:
+    """Батчевое получение информации о треках (один запрос к API)"""
+    if not track_ids:
+        return []
+    
+    tracks = client.tracks(track_ids)
+    return [
+        {
+            "id": str(track.id),
+            "title": track.title,
+            "artist": ", ".join(artist.name for artist in track.artists),
+            "cover": f"https://{track.cover_uri.replace('%%', '100x100')}" if track.cover_uri else None,
+            "duration": track.duration_ms / 1000 if track.duration_ms else None
+        }
+        for track in tracks
+    ]
 
 
 def _get_track_info_sync(track_id: str, client: Client) -> dict:
     """Синхронное получение информации о треке"""
     track = client.tracks(track_id)[0]
     return {
+        "id": track.id,
         "title": track.title,
         "artist": ", ".join(artist.name for artist in track.artists),
-        "cover": f"https://{track.cover_uri.replace('%%', '50x50')}",
+        "cover": f"https://{track.cover_uri.replace('%%', '100x100')}" if track.cover_uri else None,
         "duration": track.duration_ms / 1000 if track.duration_ms else None
     }
+
+
+async def get_tracks_batch_cached(track_ids: list) -> list:
+    """Батчевое получение треков с кэшированием"""
+    if not track_ids:
+        return []
+    
+    results = []
+    uncached_ids = []
+    uncached_indices = []
+    
+    # Проверяем кэш для каждого трека
+    for i, track_id in enumerate(track_ids):
+        cache_key = f"track_info:{track_id}"
+        cached_info = await track_info_cache.get(cache_key)
+        if cached_info:
+            results.append((i, cached_info))
+        else:
+            uncached_ids.append(track_id)
+            uncached_indices.append(i)
+    
+    # Батчевый запрос для некэшированных треков
+    if uncached_ids:
+        loop = asyncio.get_event_loop()
+        client = get_yandex_client()
+        new_tracks = await loop.run_in_executor(executor, _get_tracks_batch_sync, uncached_ids, client)
+        
+        # Кэшируем и добавляем результаты
+        for idx, track_info in zip(uncached_indices, new_tracks):
+            cache_key = f"track_info:{track_info['id']}"
+            await track_info_cache.set(cache_key, track_info, ttl=600)  # 10 минут
+            results.append((idx, track_info))
+    
+    # Сортируем по оригинальному порядку
+    results.sort(key=lambda x: x[0])
+    return [r[1] for r in results]
 
 
 async def get_track_info_cached(track_id: str) -> dict:
@@ -52,11 +117,11 @@ async def get_track_info_cached(track_id: str) -> dict:
     
     # Если нет в кэше - получаем из API в отдельном потоке
     loop = asyncio.get_event_loop()
-    client = Client(OAUTH_TOKEN).init()
+    client = get_yandex_client()
     track_info = await loop.run_in_executor(executor, _get_track_info_sync, track_id, client)
     
-    # Сохраняем в кэш на 5 минут
-    await track_info_cache.set(cache_key, track_info, ttl=300)
+    # Сохраняем в кэш на 10 минут
+    await track_info_cache.set(cache_key, track_info, ttl=600)
     
     return track_info
 
@@ -119,15 +184,20 @@ async def join_room(room_id: str, request: Request):
 
 
 @router.get("/{room_id}/queue")
-async def get_queue_tracks(room_id: str, track_id: str = ""):
+async def get_queue_tracks(room_id: str, track_id: str = "", track_url: str = ""):
     room_model = RoomsServices(db)
     info = await room_model.get_tracks_from_room(room_id)
-    print(f"Queue request for room {room_id}, track_id: {track_id}")
     
     try:
         # Если запрашивается информация об одном треке
         if track_id:
             track_info = await get_track_info_cached(track_id)
+            # Добавляем URL если передан
+            if track_url:
+                track_info = {**track_info, 'url': track_url}
+            elif 'id' in track_info:
+                # Формируем URL из track_id если не передан
+                track_info = {**track_info, 'url': f"https://music.yandex.ru/track/{track_info['id']}"}
             return JSONResponse(
                 content={'new_track': track_info},
                 headers={
@@ -136,7 +206,7 @@ async def get_queue_tracks(room_id: str, track_id: str = ""):
                 }
             )
         
-        # Получаем информацию о всех треках параллельно
+        # Получаем информацию о всех треках БАТЧЕМ (один запрос к API)
         track_urls = info.get('list_track', [])
         if not track_urls:
             return JSONResponse(
@@ -147,17 +217,24 @@ async def get_queue_tracks(room_id: str, track_id: str = ""):
                 }
             )
         
-        # Извлекаем track_id из URL и получаем информацию параллельно
-        async def get_track_from_url(url: str) -> dict:
+        # Извлекаем track_id из URL и сохраняем URL
+        track_ids = []
+        url_map = {}  # track_id -> url
+        for url in track_urls:
             clean_url = url.split("?")[0]
             tid = clean_url.split("track/")[1].split("/")[0]
-            return await get_track_info_cached(tid)
+            track_ids.append(tid)
+            url_map[tid] = url
         
-        # Параллельное получение всех треков
-        tracks = await asyncio.gather(*[get_track_from_url(url) for url in track_urls])
+        # Батчевое получение всех треков (быстрее чем по одному)
+        tracks = await get_tracks_batch_cached(track_ids)
+        
+        # Добавляем URL к каждому треку
+        for track in tracks:
+            track['url'] = url_map.get(track['id'], '')
 
         return JSONResponse(
-            content={'list_track': list(tracks), 'index': info.get('index', 0)},
+            content={'list_track': tracks, 'index': info.get('index', 0)},
             headers={
                 "Access-Control-Allow-Origin": DOMAIN,
                 "Access-Control-Allow-Credentials": "true",

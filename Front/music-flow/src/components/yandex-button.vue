@@ -259,4 +259,57 @@ window.addEventListener('error', (event) => {
   text-decoration: none;
   font-size: 14px;
 }
+
+/* Адаптация для горизонтальной ориентации на мобильных */
+@media (max-height: 600px) and (orientation: landscape) {
+  .yandex-auth-wrapper {
+    margin: clamp(8px, 2vh, 16px) auto;
+    min-height: clamp(36px, 8vh, 44px);
+    max-width: 260px;
+  }
+  
+  .yandex-button-container {
+    min-height: clamp(36px, 8vh, 44px);
+  }
+  
+  .yandex-fallback-button {
+    padding: 8px 16px;
+    font-size: 13px;
+  }
+}
+
+@media (max-height: 450px) and (orientation: landscape) {
+  .yandex-auth-wrapper {
+    margin: clamp(5px, 1.5vh, 10px) auto;
+    min-height: clamp(32px, 7vh, 38px);
+    max-width: 220px;
+  }
+  
+  .yandex-button-container {
+    min-height: clamp(32px, 7vh, 38px);
+  }
+  
+  .yandex-fallback-button {
+    padding: 6px 14px;
+    font-size: 12px;
+    border-radius: 18px;
+  }
+}
+
+@media (max-height: 380px) and (orientation: landscape) {
+  .yandex-auth-wrapper {
+    margin: clamp(3px, 1vh, 8px) auto;
+    min-height: clamp(28px, 6vh, 34px);
+    max-width: 200px;
+  }
+  
+  .yandex-button-container {
+    min-height: clamp(28px, 6vh, 34px);
+  }
+  
+  .yandex-fallback-button {
+    padding: 5px 12px;
+    font-size: 11px;
+  }
+}
 </style>

@@ -287,7 +287,7 @@ export default {
      * Проверка длины названия - если больше 30 символов, включаем marquee
      */
     isLongTitle() {
-      return this.title && this.title.length > 30;
+      return this.title && this.title.length > 25;
     },
     
     /**

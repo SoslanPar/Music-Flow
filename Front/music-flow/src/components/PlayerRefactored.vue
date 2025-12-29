@@ -119,10 +119,29 @@ export default {
       // Флаги синхронизации
       isSyncing: false,
       
+      // Флаг намеренной паузы (чтобы не возобновлять в фоне)
+      userInitiatedPause: false,
+      
       // Внутренние переменные
       currentAudio: null,
       timeUpdateInterval: null,
       nextTrackTimeout: null,
+      
+      // Предзагрузка следующего трека
+      preloadedTrack: null,
+      
+      // Состояние видимости вкладки
+      wasPlayingBeforeHidden: false,
+      
+      // Интервал синхронизации времени в фоне
+      backgroundSyncInterval: null,
+      // Время когда вкладка была скрыта
+      hiddenAtTime: 0,
+      
+      // Ожидаемый индекс трека (для синхронизации в фоне)
+      expectedTrackIndex: 0,
+      // Флаг загрузки трека в фоне
+      pendingTrackLoad: null,
     };
   },
 
@@ -135,6 +154,7 @@ export default {
     }
 
     this.setupAudioListeners();
+    this.setupVisibilityHandler();
     await this.initWebSocket();
     
     // Интервал обновления времени
@@ -165,10 +185,99 @@ export default {
     if (this.nextTrackTimeout) {
       clearTimeout(this.nextTrackTimeout);
     }
+    // Останавливаем фоновую синхронизацию
+    if (this.backgroundSyncInterval) {
+      clearInterval(this.backgroundSyncInterval);
+    }
+    // Удаляем обработчик видимости
+    document.removeEventListener('visibilitychange', this.handleVisibilityChange);
   },
 
   methods: {
     // ============ ИНИЦИАЛИЗАЦИЯ ============
+    
+    setupVisibilityHandler() {
+      // Обработка сворачивания/разворачивания вкладки
+      this.handleVisibilityChange = async () => {
+        if (document.hidden) {
+          // Вкладка скрыта - запоминаем состояние и время
+          this.wasPlayingBeforeHidden = this.isPlaying;
+          this.hiddenAtTime = this.currentAudio.currentTime;
+          this.expectedTrackIndex = this.currentTrackIndex;
+          
+          // Запускаем периодическую синхронизацию времени с сервером
+          this.startBackgroundSync();
+        } else {
+          // Вкладка снова видна - останавливаем фоновую синхронизацию
+          this.stopBackgroundSync();
+          
+          // Проверяем, есть ли отложенная загрузка трека
+          if (this.pendingTrackLoad) {
+            console.log('Processing pending track load:', this.pendingTrackLoad);
+            const { url, index, shouldPlay } = this.pendingTrackLoad;
+            this.pendingTrackLoad = null;
+            
+            // Загружаем отложенный трек
+            await this.loadTrack(url, {
+              autoPlay: shouldPlay,
+              startTime: 0
+            });
+            this.currentTrackIndex = index;
+            this.expectedTrackIndex = index;
+            this.$emit('update-tracks', this.list_tracks, this.currentTrackIndex);
+            return;
+          }
+          
+          // Запрашиваем состояние комнаты для проверки синхронизации
+          if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+            // Отправляем текущее локальное время на сервер
+            if (this.isPlaying || this.wasPlayingBeforeHidden) {
+              this.socket.send(JSON.stringify({
+                type: 'sync_time',
+                position: this.currentAudio.currentTime
+              }));
+            }
+            // Запрашиваем состояние комнаты
+            this.socket.send(JSON.stringify({ type: 'sync_state' }));
+          }
+          
+          // Небольшая задержка для обработки sync_state
+          await new Promise(r => setTimeout(r, 200));
+          
+          // Возобновляем воспроизведение если было активно и пауза
+          if (this.wasPlayingBeforeHidden && this.currentAudio.paused) {
+            try {
+              await this.currentAudio.play();
+              this.isPlaying = true;
+            } catch (e) {
+              console.log('Resume play error:', e);
+            }
+          }
+        }
+      };
+      document.addEventListener('visibilitychange', this.handleVisibilityChange);
+    },
+    
+    startBackgroundSync() {
+      // Синхронизируем время каждые 5 секунд пока вкладка в фоне
+      if (this.backgroundSyncInterval) return;
+      
+      this.backgroundSyncInterval = setInterval(() => {
+        if (this.socket && this.socket.readyState === WebSocket.OPEN && this.isPlaying) {
+          this.socket.send(JSON.stringify({
+            type: 'sync_time',
+            position: this.currentAudio.currentTime
+          }));
+        }
+      }, 5000);
+    },
+    
+    stopBackgroundSync() {
+      if (this.backgroundSyncInterval) {
+        clearInterval(this.backgroundSyncInterval);
+        this.backgroundSyncInterval = null;
+      }
+    },
     
     setupAudioListeners() {
       let isTrackEnding = false;
@@ -177,13 +286,18 @@ export default {
         if (isTrackEnding) return;
         isTrackEnding = true;
 
-        await new Promise(resolve => setTimeout(resolve, 300));
+        console.log('Track ended, switching to next...');
+        
+        // Небольшая задержка для предотвращения двойного срабатывания
+        await new Promise(resolve => setTimeout(resolve, 200));
 
-        if (Math.abs(this.currentAudio.currentTime - this.currentAudio.duration) < 1) {
-          await this.sendNextTrack();
+        // Переключаем на следующий трек (работает и в фоне)
+        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+          sendSocketMessage(this.socket, { type: 'next_track' });
         }
 
-        isTrackEnding = false;
+        // Сбрасываем флаг через секунду
+        setTimeout(() => { isTrackEnding = false; }, 1000);
       });
 
       this.currentAudio.addEventListener('timeupdate', () => {
@@ -195,6 +309,24 @@ export default {
       this.currentAudio.addEventListener('loadedmetadata', () => {
         if (this.currentAudio && Number.isFinite(this.currentAudio.duration)) {
           this.duration = this.currentAudio.duration;
+        }
+      });
+      
+      // Обработка паузы браузером (при сворачивании)
+      this.currentAudio.addEventListener('pause', () => {
+        // Если это намеренная пауза от пользователя - не возобновляем
+        if (this.userInitiatedPause) {
+          return;
+        }
+        
+        // Если пауза не от пользователя и вкладка скрыта - это браузер
+        if (document.hidden && this.wasPlayingBeforeHidden) {
+          // Пробуем возобновить
+          setTimeout(() => {
+            if (document.hidden && this.wasPlayingBeforeHidden && !this.userInitiatedPause) {
+              this.currentAudio.play().catch(() => {});
+            }
+          }, 100);
         }
       });
     },
@@ -227,7 +359,11 @@ export default {
       this.$emit('update-tracks', tracksArray, currentIndex);
     },
 
-    async loadTrack(trackUrl, callback) {
+    async loadTrack(trackUrl, options = {}) {
+      const { callback, autoPlay = false, startTime = 0 } = typeof options === 'function' 
+        ? { callback: options } 
+        : options;
+      
       try {
         // Анимация исчезновения (кроме первой загрузки)
         if (!this.isInitialLoad) {
@@ -247,8 +383,22 @@ export default {
         this.currentArtist = metadata.artist;
         this.$refs.coverImage.src = metadata.cover;
 
-        // Загружаем аудио
-        this.duration = await loadAudioStream(this.currentAudio, metadata.streamUrl);
+        // Устанавливаем duration из API сразу (для отображения в UI)
+        if (metadata.duration) {
+          this.duration = metadata.duration;
+        }
+
+        // Загружаем аудио (передаём известную длительность)
+        const loadedDuration = await loadAudioStream(
+          this.currentAudio, 
+          metadata.streamUrl, 
+          metadata.duration
+        );
+        
+        // Обновляем duration если браузер определил точнее
+        if (loadedDuration && isFinite(loadedDuration)) {
+          this.duration = loadedDuration;
+        }
 
         // Настраиваем Media Session
         setupMediaSession(metadata, {
@@ -257,6 +407,21 @@ export default {
           previoustrack: () => this.prevTrack(),
           nexttrack: () => this.nextTrack(),
         });
+
+        // Устанавливаем позицию если указана
+        if (startTime > 0) {
+          this.currentAudio.currentTime = startTime;
+        }
+
+        // Автовоспроизведение при переключении трека
+        if (autoPlay) {
+          try {
+            await this.currentAudio.play();
+            this.isPlaying = true;
+          } catch (e) {
+            console.log('AutoPlay blocked:', e.message);
+          }
+        }
 
         // Callback и скрытие прелоадера
         if (callback) callback();
@@ -268,29 +433,95 @@ export default {
           { opacity: 0, y: -20 },
           { opacity: 0.8, y: 0, duration: 0.6, ease: 'power2.out', stagger: 0.1 }
         );
+        
+        // Предзагрузка следующего трека (асинхронно, не блокирует)
+        this.preloadNextTrack();
       } catch (error) {
         console.error('Ошибка загрузки трека:', error);
+        if (this.isLoading) this.hideLoader();
+      }
+    },
+    
+    // Предзагрузка метаданных и ссылки следующего трека
+    async preloadNextTrack() {
+      if (this.list_tracks.length <= 1) return;
+      
+      const nextIndex = (this.currentTrackIndex + 1) % this.list_tracks.length;
+      const nextTrackUrl = this.list_tracks[nextIndex]?.url || this.list_tracks[nextIndex];
+      
+      if (!nextTrackUrl || typeof nextTrackUrl !== 'string') return;
+      
+      try {
+        // Предзагружаем метаданные следующего трека
+        const metadata = await loadTrackMetadata(nextTrackUrl, this.userId);
+        this.preloadedTrack = {
+          index: nextIndex,
+          url: nextTrackUrl,
+          metadata: metadata
+        };
+        
+        // Предзагружаем начало аудио в кэш браузера
+        if (metadata.streamUrl) {
+          const preloadLink = document.createElement('link');
+          preloadLink.rel = 'prefetch';
+          preloadLink.href = metadata.streamUrl;
+          preloadLink.as = 'audio';
+          document.head.appendChild(preloadLink);
+          
+          // Удаляем через 30 секунд
+          setTimeout(() => preloadLink.remove(), 15000);
+        }
+      } catch (e) {
+        console.log('Preload error (non-critical):', e.message);
       }
     },
 
     // ============ КОМАНДЫ ВОСПРОИЗВЕДЕНИЯ ============
     
     async sendPlayCommand() {
+      // Сбрасываем флаг намеренной паузы
+      this.userInitiatedPause = false;
+      
+      // Сначала выполняем локально - важно для фонового режима
+      try {
+        await this.currentAudio.play();
+        this.isPlaying = true;
+        this.wasPlayingBeforeHidden = true;
+        
+        // Обновляем Media Session
+        if ('mediaSession' in navigator) {
+          navigator.mediaSession.playbackState = 'playing';
+        }
+      } catch (e) {
+        console.log('Play error:', e.message);
+      }
+      
+      // Отправляем на сервер
       sendSocketMessage(this.socket, {
         type: 'play',
         position: this.currentAudio.currentTime
       });
-      this.currentAudio.play();
-      this.isPlaying = true;
     },
 
     async sendPauseCommand() {
+      // Отмечаем что это намеренная пауза
+      this.userInitiatedPause = true;
+      
+      // Сначала выполняем локально - важно для фонового режима
+      this.currentAudio.pause();
+      this.isPlaying = false;
+      this.wasPlayingBeforeHidden = false;
+      
+      // Обновляем Media Session
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.playbackState = 'paused';
+      }
+      
+      // Отправляем на сервер
       sendSocketMessage(this.socket, {
         type: 'pause',
         position: this.currentAudio.currentTime
       });
-      this.currentAudio.pause();
-      this.isPlaying = false;
     },
 
     async onSeek(currentTime) {
@@ -337,10 +568,11 @@ export default {
 
     async sendPrevTrack() {
       if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+        // Если трек играет больше 5 секунд - возвращаем на начало
         if (this.currentAudio.currentTime > 5) {
           this.onSeek(0);
         } else {
-          this.sendPauseCommand();
+          // Иначе переключаем на предыдущий трек
           sendSocketMessage(this.socket, { type: 'previous_track' });
         }
       }
@@ -375,12 +607,27 @@ export default {
     },
 
     // Отправить новый порядок треков на сервер
-    sendReorderTracks(newTracks, newCurrentIndex) {
+    sendReorderTracks(newTracks, newCurrentIndex, oldIndex, newIndex) {
       if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+        // Извлекаем URL-ы из объектов метаданных для сервера
+        const trackUrls = newTracks.map(track => track.url || track);
+        
         sendSocketMessage(this.socket, {
           type: 'reorder_tracks',
-          tracks: newTracks,
-          index: newCurrentIndex
+          tracks: trackUrls,
+          index: newCurrentIndex,
+          old_index: oldIndex,
+          new_index: newIndex
+        });
+      }
+    },
+
+    // Удалить трек из очереди (отправка на сервер)
+    removeTrack(index) {
+      if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+        sendSocketMessage(this.socket, {
+          type: 'remove_track',
+          index: index
         });
       }
     },
@@ -402,45 +649,90 @@ export default {
             const queueData = await fetchQueue(this.roomId);
             this.updateTracksList(queueData.list_track, queueData.index);
             
-            await this.loadTrack(data.track_url, () => {
-              this.currentAudio.currentTime = data.current_time;
-              if (data.is_playing) {
-                this.currentAudio.play().catch(e => console.log('Play error:', e));
-                this.isPlaying = true;
-              }
+            // Инициализируем ожидаемый индекс
+            this.expectedTrackIndex = queueData.index;
+            
+            await this.loadTrack(data.track_url, {
+              autoPlay: data.is_playing,
+              startTime: data.current_time || 0
             });
           }
           break;
 
         case 'track_state':
-          await this.loadTrack(data.url, () => {
-            this.currentAudio.currentTime = data.position;
-            if (data.is_playing) {
-              this.currentAudio.play().catch(e => console.log('Play error:', e));
-              this.isPlaying = true;
-            }
+          await this.loadTrack(data.url, {
+            autoPlay: data.is_playing,
+            startTime: data.position || 0
           });
+          break;
+
+        case 'state_sync':
+          // Синхронизация состояния при возврате из фоновой вкладки
+          // Проверяем индекс трека - если отличается или есть ожидаемый индекс
+          const serverIndex = data.index;
+          const needsTrackSync = serverIndex !== this.currentTrackIndex || 
+                                  serverIndex !== this.expectedTrackIndex;
+          
+          if (needsTrackSync && data.track_url) {
+            console.log(`Track sync: local=${this.currentTrackIndex}, expected=${this.expectedTrackIndex}, server=${serverIndex}, loading correct track`);
+            
+            // Если уже есть pendingTrackLoad с этим индексом - не загружаем повторно
+            if (this.pendingTrackLoad && this.pendingTrackLoad.index === serverIndex) {
+              console.log('Track already pending, skipping sync load');
+              this.currentTrackIndex = serverIndex;
+              this.expectedTrackIndex = serverIndex;
+              this.$emit('update-tracks', this.list_tracks, this.currentTrackIndex);
+            } else {
+              this.currentTrackIndex = serverIndex;
+              this.expectedTrackIndex = serverIndex;
+              this.$emit('update-tracks', this.list_tracks, this.currentTrackIndex);
+              
+              // Загружаем правильный трек
+              await this.loadTrack(data.track_url, {
+                autoPlay: data.is_playing,
+                startTime: data.current_time || 0
+              });
+            }
+            this.isPlaying = data.is_playing;
+            this.wasPlayingBeforeHidden = data.is_playing;
+          } else {
+            // Трек тот же - НЕ перематываем если локальное время впереди (играли в фоне)
+            const localTime = this.currentAudio.currentTime;
+            const serverTime = data.current_time || 0;
+            
+            // Если сервер впереди более чем на 2 секунды - синхронизируемся
+            if (serverTime > localTime + 2) {
+              this.currentAudio.currentTime = serverTime;
+            }
+            
+            // Синхронизируем состояние play/pause
+            if (data.is_playing && this.currentAudio.paused) {
+              this.currentAudio.play().catch(e => console.log('Sync play error:', e));
+              this.isPlaying = true;
+            } else if (!data.is_playing && !this.currentAudio.paused) {
+              this.currentAudio.pause();
+              this.isPlaying = false;
+            }
+            this.wasPlayingBeforeHidden = data.is_playing;
+          }
           break;
 
         case 'play':
           this.handlePlayMessage(data);
+          // В фоне тоже обновляем флаг
+          this.wasPlayingBeforeHidden = true;
           break;
 
         case 'pause':
           this.handlePauseMessage(data);
+          // В фоне тоже обновляем флаг
+          this.wasPlayingBeforeHidden = false;
           break;
 
         case 'change_track':
           if (data.tracks && data.tracks.length > 0 && !this.isSyncing) {
-            // Сохраняем состояние воспроизведения перед загрузкой
-            const shouldAutoPlay = this.isPlaying;
-            
-            await this.loadTrack(data.tracks[data.index], () => {
-              // Всегда начинаем воспроизведение при смене трека
-              // (пользователь либо нажал next, либо трек закончился)
-              this.currentAudio.currentTime = 0;
-              this.currentAudio.play().catch(e => console.log('Play error:', e));
-              this.isPlaying = true;
+            await this.loadTrack(data.tracks[data.index], {
+              autoPlay: true  // Всегда автовоспроизведение при смене трека
             });
           }
           if (data.tracks) {
@@ -458,24 +750,111 @@ export default {
           break;
 
         case 'load_track':
-          this.updateTracksList(this.list_tracks, data.index);
-          await this.loadTrack(data.url);
+          // При переключении трека обновляем ожидаемый индекс
+          this.expectedTrackIndex = data.index;
+          
+          // Если вкладка в фоне - откладываем загрузку на момент возврата
+          // НО аудио всё равно загружаем для Media Session
+          if (document.hidden) {
+            console.log('Background track change detected, loading audio...');
+            
+            // Сохраняем информацию для UI при возврате из фона
+            this.pendingTrackLoad = {
+              url: data.url,
+              index: data.index,
+              shouldPlay: true
+            };
+            
+            // Обновляем индекс сразу
+            this.currentTrackIndex = data.index;
+            this.$emit('update-tracks', this.list_tracks, this.currentTrackIndex);
+            
+            // Загружаем аудио в фоне (без UI анимаций)
+            try {
+              const metadata = await loadTrackMetadata(data.url, this.userId);
+              
+              // Обновляем данные трека
+              this.currentTrackTitle = metadata.title;
+              this.currentArtist = metadata.artist;
+              
+              // Обновляем Media Session для системных контролов
+              setupMediaSession(metadata, {
+                play: () => this.sendPlayCommand(),
+                pause: () => this.sendPauseCommand(),
+                previoustrack: () => this.prevTrack(),
+                nexttrack: () => this.nextTrack(),
+              });
+              
+              // Загружаем аудио
+              await loadAudioStream(this.currentAudio, metadata.streamUrl, metadata.duration);
+              if (metadata.duration) {
+                this.duration = metadata.duration;
+              }
+              
+              // Пробуем воспроизвести
+              try {
+                await this.currentAudio.play();
+                this.isPlaying = true;
+                this.wasPlayingBeforeHidden = true;
+                // Если удалось воспроизвести - очищаем pending
+                this.pendingTrackLoad = null;
+              } catch (playError) {
+                console.log('Background autoplay blocked:', playError.message);
+                this.wasPlayingBeforeHidden = true;
+              }
+            } catch (e) {
+              console.log('Background track load error:', e.message);
+              this.wasPlayingBeforeHidden = true;
+            }
+          } else {
+            // Вкладка активна - нормальная загрузка с UI
+            this.currentTrackIndex = data.index;
+            this.$emit('update-tracks', this.list_tracks, this.currentTrackIndex);
+            
+            try {
+              await this.loadTrack(data.url, { 
+                autoPlay: true
+              });
+              this.isPlaying = true;
+            } catch (e) {
+              console.log('Load track error:', e.message);
+            }
+          }
           break;
 
-        case 'add_track':
-          const newTrackData = await fetchQueue(this.roomId, data.track_id);
-          if (newTrackData.new_track) {
-            this.list_tracks.push(newTrackData.new_track);
-            this.updateTracksList(this.list_tracks, this.currentTrackIndex);
+        case 'track_removed':
+          // Обработка удаления трека - удаляем по индексу из локального массива
+          if (data.removed_index !== undefined && this.list_tracks.length > 0) {
+            // Удаляем элемент из локального массива метаданных
+            this.list_tracks.splice(data.removed_index, 1);
+            this.currentTrackIndex = data.index;
+            this.updateTracksList([...this.list_tracks], this.currentTrackIndex);
           }
           break;
 
         case 'tracks_reordered':
-          // Другой участник перетасовал треки
-          if (data.tracks) {
-            this.list_tracks = data.tracks;
+          // Обработка перемещения треков другим участником
+          // data.tracks содержит новый порядок URL-ов, нужно переставить локальные данные
+          if (data.tracks && data.old_index !== undefined && data.new_index !== undefined) {
+            // Переставляем элемент в локальном массиве метаданных
+            const [movedTrack] = this.list_tracks.splice(data.old_index, 1);
+            this.list_tracks.splice(data.new_index, 0, movedTrack);
             this.currentTrackIndex = data.index;
-            this.updateTracksList(this.list_tracks, this.currentTrackIndex);
+            this.updateTracksList([...this.list_tracks], this.currentTrackIndex);
+          }
+          break;
+
+        case 'add_track':
+          // Запрашиваем метаданные нового трека, включая URL
+          const newTrackData = await fetchQueue(this.roomId, data.track_id);
+          if (newTrackData.new_track) {
+            // Добавляем URL к метаданным если не пришёл с сервера
+            const newTrack = {
+              ...newTrackData.new_track,
+              url: newTrackData.new_track.url || data.track_url || `https://music.yandex.ru/track/${data.track_id}`
+            };
+            this.list_tracks.push(newTrack);
+            this.updateTracksList([...this.list_tracks], this.currentTrackIndex);
           }
           break;
       }
@@ -483,15 +862,29 @@ export default {
 
     handlePlayMessage(data) {
       this.isSyncing = true;
+      this.userInitiatedPause = false;  // Сбрасываем флаг паузы
       this.isPlaying = syncPlayback(this.currentAudio, true, data.position);
-      this.currentAudio.play();
+      this.currentAudio.play().catch(e => console.log('Play error:', e));
+      this.wasPlayingBeforeHidden = true;
+      
+      // Обновляем состояние Media Session
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.playbackState = 'playing';
+      }
       setTimeout(() => { this.isSyncing = false; }, 100);
     },
 
     handlePauseMessage(data) {
       this.isSyncing = true;
+      this.userInitiatedPause = true;  // Устанавливаем флаг паузы
       this.isPlaying = syncPlayback(this.currentAudio, false, data.position);
       this.currentAudio.pause();
+      this.wasPlayingBeforeHidden = false;
+      
+      // Обновляем состояние Media Session
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.playbackState = 'paused';
+      }
       setTimeout(() => { this.isSyncing = false; }, 100);
     },
 

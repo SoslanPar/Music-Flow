@@ -39,3 +39,7 @@ uvicorn==0.34.0
 websockets==15.0.1
 yandex-music==2.2.0
 yarl==1.18.3
+passlib[bcrypt]==1.7.4
+bcrypt==4.2.0
+email-validator==2.3.0
+dnspython==2.8.0

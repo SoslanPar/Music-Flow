@@ -44,12 +44,25 @@ export const authApi = {
   },
 
   /**
-   * Войти по логину и паролю
+   * Войти по логину и паролю (POST с JSON body)
+   * Пароль отправляется в открытом виде - хеширование на сервере через bcrypt
    */
-  async signIn(nickname, hashedPassword) {
-    return fetchWithError(
-      `${API_BASE}/auth/sign-in?nickname=${encodeURIComponent(nickname)}&hashed_password=${encodeURIComponent(hashedPassword)}`
-    );
+  async signIn(nickname, password) {
+    return fetchWithError(`${API_BASE}/auth/sign-in`, {
+      method: 'POST',
+      body: JSON.stringify({ nickname, password }),
+    });
+  },
+
+  /**
+   * Регистрация нового пользователя (POST с JSON body)
+   * Пароль отправляется в открытом виде - хеширование на сервере через bcrypt
+   */
+  async signUp(email, username, password, birthday = null) {
+    return fetchWithError(`${API_BASE}/auth/sign-up`, {
+      method: 'POST',
+      body: JSON.stringify({ email, username, password, birthday }),
+    });
   },
 };
 

@@ -2,6 +2,7 @@ import asyncio
 import uuid
 from fastapi import WebSocket, WebSocketDisconnect
 from sqlalchemy import select
+from sqlalchemy.orm.attributes import flag_modified
 from models.Rooms import Rooms
 from services.users_services import UserServices
 from db.base import Database
@@ -62,17 +63,26 @@ class ConnectionManager:
         async with self.db.session_factory() as session:
             room = await session.get(Rooms, uuid.UUID(room_id))
             if not room:
-                raise ValueError(f"Room {room_id} not found in DB")  # <-- Явная ошибка!
+                raise ValueError(f"Room {room_id} not found in DB")
             
+            # Поля, которые являются мутабельными (списки, словари)
+            mutable_fields = {'list_track', 'list_of_participants', 'list_users', 'users_index'}
 
             for key, value in update_data.items():
-                if 'new_track' == key:
+                if key == 'new_track':
+                    # Добавление нового трека
                     if value[0] not in room.list_track:
-                        value = room.list_track + value
-                        key = 'list_track'
-                    else:
-                        continue
+                        # Создаём новый список чтобы SQLAlchemy заметил изменение
+                        new_list = list(room.list_track) + value
+                        room.list_track = new_list
+                        flag_modified(room, 'list_track')
+                    continue
+                
                 setattr(room, key, value)
+                
+                # Помечаем мутабельные поля как изменённые
+                if key in mutable_fields:
+                    flag_modified(room, key)
 
             await session.commit()
             return room

@@ -2,7 +2,7 @@ import asyncio
 import uuid
 import time
 from fastapi import WebSocket, WebSocketDisconnect
-from .websocket_manager import ConnectionManager  # Импортируй правильно свой файл!
+from .websocket_manager import ConnectionManager
 
 class WebSocketRoutes:
     def __init__(self, manager: ConnectionManager):
@@ -26,11 +26,12 @@ class WebSocketRoutes:
 
         reader_task = asyncio.create_task(self._message_reader(websocket, message_queue, room_id, user_id))
         try:
-            # Получаем актуальное время
-            current_position = await self._get_consensus_time(room_id, exclude_user=user_id)
-
-            await self.manager.update_room_state(room_id, {"time_moment": current_position})
-            room_state["time_moment"] = current_position
+            # Используем сохранённое время из БД (без ожидания ответов от других клиентов)
+            # Это ускоряет подключение с 1+ секунды до ~50мс
+            current_position = room_state.get("time_moment", 0)
+            
+            # Асинхронно запрашиваем актуальное время у других участников (не блокируем)
+            asyncio.create_task(self._sync_time_async(room_id, user_id))
 
             await self._send_initial_state(websocket, room_state, user_id)
 
@@ -68,23 +69,28 @@ class WebSocketRoutes:
         #     print('ERROR 66:', str(e))
 
     async def _get_consensus_time(self, room_id: str, exclude_user: str) -> float:
-        # Запрашиваем время у всех участников
-        await self.manager.get_current_playback_time(room_id, exclude_user)
-
-        # Ждём ответы (например, 1 секунду)
-        await asyncio.sleep(1.0)
-
-        # Собираем все ответы
-        if room_id not in self.time_responses:
-            return 0.0
-
-        responses = self.time_responses[room_id].values()
-        if not responses:
-            return 0.0
-
-        # Берём среднее время (или первый ответ)
-        avg_time = sum(responses) / len(responses)
-        return avg_time
+        """Быстрое получение времени - используем сохранённое в БД"""
+        room_state = await self.manager.get_room_state(room_id)
+        return room_state.get("time_moment", 0.0)
+    
+    async def _sync_time_async(self, room_id: str, exclude_user: str):
+        """Асинхронная синхронизация времени (не блокирует подключение)"""
+        try:
+            # Запрашиваем время у участников
+            await self.manager.get_current_playback_time(room_id, exclude_user)
+            
+            # Ждём короткое время для ответов
+            await asyncio.sleep(0.3)
+            
+            # Обновляем время если получили ответы
+            if room_id in self.time_responses and self.time_responses[room_id]:
+                responses = list(self.time_responses[room_id].values())
+                if responses:
+                    avg_time = sum(responses) / len(responses)
+                    await self.manager.update_room_state(room_id, {"time_moment": avg_time})
+                    self.time_responses[room_id].clear()
+        except Exception as e:
+            print(f"Time sync error: {e}")
     # async def _get_consensus_time(self, room_id: str, exclude_user: str) -> float:
     #     connections = [
     #         conn for uid, conn in self.manager.active_connections.get(room_id, {}).items()
@@ -121,12 +127,14 @@ class WebSocketRoutes:
     #         print('ERROR FROM _request_current_time:', e)
 
     async def _send_initial_state(self, websocket: WebSocket, room_state: dict, user_id: str):
+        # При подключении к комнате всегда начинаем с паузы
+        # Пользователь сам запустит воспроизведение когда будет готов
         message = {
             "type": "init",
             "room": room_state,
             "user_id": user_id,
             "current_time": room_state.get("time_moment", 0),
-            "is_playing": room_state.get("status_track", False)
+            "is_playing": False  # Всегда пауза при заходе в комнату
         }
 
         if room_state.get("list_track") and len(room_state["list_track"]) > 0:
@@ -141,7 +149,33 @@ class WebSocketRoutes:
             return  # Игнорируем некорректные данные
 
         msg_type = data["type"]
-        print(msg_type)
+        print(f"[WS] {user_id}: {msg_type}")
+
+        # Heartbeat ping/pong
+        if msg_type == "ping":
+            await websocket.send_json({"type": "pong"})
+            return
+        
+        # Синхронизация времени из фоновой вкладки (не сбрасывает воспроизведение)
+        if msg_type == "sync_time":
+            position = data.get("position", 0)
+            await self.manager.update_room_state(room_id, {
+                "time_moment": position
+            })
+            return
+        
+        # Синхронизация состояния (при возврате из фона)
+        if msg_type == "sync_state":
+            room_state = await self.manager.get_room_state(room_id)
+            await websocket.send_json({
+                "type": "state_sync",
+                "room": room_state,
+                "current_time": room_state.get("time_moment", 0),
+                "is_playing": room_state.get("status_track", False),
+                "track_url": room_state["list_track"][room_state["index_track"]] if room_state.get("list_track") else None,
+                "index": room_state.get("index_track", 0)
+            })
+            return
 
         if msg_type == "current_time":
             if room_id not in self.time_responses:
@@ -150,33 +184,63 @@ class WebSocketRoutes:
             return  # Просто ответ на запрос времени
 
         if msg_type == "play":
-            # await self.manager.update_room_state(room_id, {
-            #     "status_track": True,
-            #     "time_moment": data.get("position", 0)
-            # })
+            await self.manager.update_room_state(room_id, {
+                "status_track": True,
+                "time_moment": data.get("position", 0)
+            })
             await self.manager.broadcast(room_id, {
                 "type": "play",
                 "position": data.get("position", 0)
             }, exclude_user=user_id)
 
         elif msg_type == "pause":
-            # await self.manager.update_room_state(room_id, {
-            #     "status_track": False,
-            #     "time_moment": data.get("position", 0)
-            # })
+            await self.manager.update_room_state(room_id, {
+                "status_track": False,
+                "time_moment": data.get("position", 0)
+            })
             await self.manager.broadcast(room_id, {
                 "type": "pause",
                 "position": data.get("position", 0)
             }, exclude_user=user_id)
 
         elif msg_type == "seek":
-            # await self.manager.update_room_state(room_id, {
-            #     "time_moment": data.get("position", 0)
-            # })
+            await self.manager.update_room_state(room_id, {
+                "time_moment": data.get("position", 0)
+            })
             await self.manager.broadcast(room_id, {
                 "type": "seek",
                 "position": data.get("position", 0)
             }, exclude_user=user_id)
+
+        elif msg_type == "remove_track":
+            # Удаление трека из очереди
+            track_index = data.get("index")
+            if track_index is not None:
+                room_state = await self.manager.get_room_state(room_id)
+                tracks = list(room_state.get("list_track", []))
+                
+                if 0 <= track_index < len(tracks):
+                    tracks.pop(track_index)
+                    
+                    # Корректируем текущий индекс если нужно
+                    current_index = room_state.get("index_track", 0)
+                    if track_index < current_index:
+                        current_index = max(0, current_index - 1)
+                    elif track_index == current_index and current_index >= len(tracks):
+                        current_index = max(0, len(tracks) - 1)
+                    
+                    await self.manager.update_room_state(room_id, {
+                        "list_track": tracks,
+                        "index_track": current_index
+                    })
+                    
+                    # Оповещаем всех участников
+                    await self.manager.broadcast(room_id, {
+                        "type": "track_removed",
+                        "removed_index": track_index,
+                        "tracks": tracks,
+                        "index": current_index
+                    })
 
         elif msg_type == "change_track":
             tracks = data.get("tracks", [])
@@ -212,7 +276,8 @@ class WebSocketRoutes:
                 track_id = clean_url.split("track/")[1].split("/")[0]
                 await self.manager.broadcast(room_id, {
                         "type": "add_track",
-                        'track_id': track_id
+                        'track_id': track_id,
+                        'track_url': tracks[0]  # URL для формирования полных метаданных
                     })
         elif msg_type == "next_track":
             current_time = time.time()
@@ -224,8 +289,9 @@ class WebSocketRoutes:
             await self.manager.update_room_state(room_id, {
                     "index_track": new_index,
                     "time_moment": 0,
-                    "status_track": False,
+                    "status_track": True,  # При переключении - воспроизводим
                 })
+            # Отправляем ВСЕМ участникам, включая инициатора
             await self.manager.broadcast(room_id, {
                     "type": "load_track",
                     "url": room_state['list_track'][new_index],
@@ -247,8 +313,9 @@ class WebSocketRoutes:
             await self.manager.update_room_state(room_id, {
                     "index_track": new_index,
                     "time_moment": 0,
-                    "status_track": False,
+                    "status_track": True,  # При переключении - воспроизводим
                 })
+            # Отправляем ВСЕМ участникам, включая инициатора
             await self.manager.broadcast(room_id, {
                     "type": "load_track",
                     "url": room_state['list_track'][new_index],
@@ -267,6 +334,8 @@ class WebSocketRoutes:
             # Получаем новый порядок треков и текущий индекс
             new_tracks = data.get("tracks", [])
             new_index = data.get("index", 0)
+            old_index = data.get("old_index")
+            moved_to_index = data.get("new_index")
             
             if new_tracks:
                 await self.manager.update_room_state(room_id, {
@@ -277,7 +346,9 @@ class WebSocketRoutes:
                 await self.manager.broadcast(room_id, {
                     "type": "tracks_reordered",
                     "tracks": new_tracks,
-                    "index": new_index
+                    "index": new_index,
+                    "old_index": old_index,
+                    "new_index": moved_to_index
                 }, exclude_user=user_id)
 
         elif msg_type == "play_track_by_index":
@@ -289,8 +360,9 @@ class WebSocketRoutes:
                 await self.manager.update_room_state(room_id, {
                     "index_track": index,
                     "time_moment": 0,
-                    "status_track": False,
+                    "status_track": True,  # При выборе трека - воспроизводим
                 })
+                # Отправляем ВСЕМ участникам, включая инициатора
                 await self.manager.broadcast(room_id, {
                     "type": "load_track",
                     "url": room_state["list_track"][index],

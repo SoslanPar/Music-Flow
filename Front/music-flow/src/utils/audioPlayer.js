@@ -3,7 +3,6 @@
  */
 
 import { tracksApi } from './api.js';
-import { loadWithMediaSource } from './mediaSourcePlayer.js';
 
 /**
  * Загрузить трек и получить метаданные
@@ -14,50 +13,100 @@ export async function loadTrackMetadata(trackUrl, userId) {
     title: data.title,
     artist: data.artist,
     cover: data.cover,
-    streamUrl: `/api/tracks${data.stream_url}`,
-    duration: data.duration,
+    streamUrl: data.stream_url, // Прямая ссылка Yandex (без проксирования)
+    duration: data.duration,    // Длительность в секундах
   };
 }
 
 /**
- * Загрузить аудио в элемент через MediaSource
+ * Загрузить аудио в элемент (прямая загрузка, без MediaSource)
+ * Возвращает Promise который резолвится когда трек готов к воспроизведению
  */
-export async function loadAudioStream(audioElement, streamUrl) {
-  audioElement.pause();
-  audioElement.removeAttribute('src');
-  audioElement.load();
-
-  // Очистка старых обработчиков
-  audioElement.onerror = null;
-  audioElement.onloadedmetadata = null;
-  audioElement.ondurationchange = null;
-
-  await loadWithMediaSource(audioElement, streamUrl);
-
-  // Ждём, пока длительность станет известна
-  await waitForDuration(audioElement);
-  
-  return audioElement.duration;
-}
-
-/**
- * Ожидание загрузки длительности трека
- */
-function waitForDuration(audioElement, timeout = 10000) {
+export async function loadAudioStream(audioElement, streamUrl, knownDuration = null) {
   return new Promise((resolve, reject) => {
-    const checkDuration = () => {
-      if (audioElement.duration && audioElement.duration > 0) {
-        resolve(audioElement.duration);
-      } else {
-        setTimeout(checkDuration, 100);
-      }
+    // Останавливаем текущее воспроизведение
+    audioElement.pause();
+    
+    let resolved = false;
+    let timeoutId = null;
+    
+    // Очистка старых обработчиков
+    const cleanup = () => {
+      audioElement.oncanplaythrough = null;
+      audioElement.oncanplay = null;
+      audioElement.onerror = null;
+      audioElement.onloadedmetadata = null;
+      audioElement.onloadeddata = null;
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+    
+    const resolveOnce = (duration) => {
+      if (resolved) return;
+      resolved = true;
+      cleanup();
+      resolve(duration);
     };
 
-    const timeoutId = setTimeout(() => {
-      reject(new Error('Не удалось определить длительность трека'));
+    // Обработчик успешной загрузки (основной)
+    audioElement.oncanplaythrough = () => {
+      const duration = audioElement.duration && isFinite(audioElement.duration) 
+        ? audioElement.duration 
+        : knownDuration;
+      resolveOnce(duration);
+    };
+    
+    // Альтернативный обработчик (для фоновых вкладок)
+    audioElement.oncanplay = () => {
+      const duration = audioElement.duration && isFinite(audioElement.duration) 
+        ? audioElement.duration 
+        : knownDuration;
+      resolveOnce(duration);
+    };
+    
+    // Ещё один fallback - loadeddata
+    audioElement.onloadeddata = () => {
+      // Даём немного времени на определение длительности
+      setTimeout(() => {
+        if (!resolved) {
+          const duration = audioElement.duration && isFinite(audioElement.duration) 
+            ? audioElement.duration 
+            : knownDuration;
+          resolveOnce(duration);
+        }
+      }, 100);
+    };
+
+    // Обработчик ошибки
+    audioElement.onerror = (e) => {
+      if (resolved) return;
+      cleanup();
+      reject(new Error(`Ошибка загрузки аудио: ${audioElement.error?.message || 'Unknown'}`));
+    };
+
+    // Загрузка метаданных (для получения duration)
+    audioElement.onloadedmetadata = () => {
+      // Если в фоновой вкладке, резолвим сразу - загрузка и play важнее точной duration
+      if (document.hidden) {
+        const duration = audioElement.duration && isFinite(audioElement.duration) 
+          ? audioElement.duration 
+          : knownDuration;
+        resolveOnce(duration);
+      }
+    };
+    
+    // Таймаут на случай если события не сработают (например в фоне)
+    // В фоне используем короткий таймаут чтобы не блокировать загрузку
+    const timeout = document.hidden ? 1000 : 5000;
+    timeoutId = setTimeout(() => {
+      if (!resolved) {
+        console.log('Audio load timeout, resolving with known duration');
+        resolveOnce(knownDuration);
+      }
     }, timeout);
 
-    checkDuration();
+    // Устанавливаем источник и начинаем загрузку
+    audioElement.src = streamUrl;
+    audioElement.load();
   });
 }
 
