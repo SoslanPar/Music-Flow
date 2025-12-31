@@ -25,14 +25,11 @@ onMounted(() => {
     if (event.data.type === 'yandex_auth_success') {
       try {
         const code = event.data.code;
-        console.log('ПолученЯндекс:', event.data);
-        console.log('Получен code от Яндекс:', code);
         
         // 1. Сохраняем токен в localStorage
         localStorage.setItem('yandex_token', code);
         
         // 2. Отправляем токен на сервер для валидации
-        console.log(code);
         const response = await fetch(
           `/api/auth/check_token?code=${encodeURIComponent(code)}`,
           {
@@ -43,25 +40,22 @@ onMounted(() => {
             credentials: 'include'
           }
         );
-        console.log('response:', response);
+        
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
         
         const result = await response.json();
-        console.log('Ответ сервера:', result);
         
         // 3. Проверяем ответ сервера и перенаправляем
         if (result.success) {
           document.cookie = `user_id=${result.user_id}; path=/; SameSite=Lax`;
           router.push('/Main');
         } else {
-          console.error('Сервер отклонил токен:', result.message);
           router.push('/login?error=invalid_token');
         }
         
       } catch (error) {
-        console.error('Ошибка при обработке токена:', error);
         router.push('/login?error=auth_failed');
       }
     }

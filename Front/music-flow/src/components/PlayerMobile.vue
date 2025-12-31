@@ -171,144 +171,79 @@
   </div>
 </template>
 
-<script>
-export default {
-  name: 'PlayerMobile',
-  
-  props: {
-    title: { type: String, default: 'Название трека' },
-    artist: { type: String, default: 'Исполнитель' },
-    coverUrl: { type: String, default: '' },
-    currentTime: { type: Number, default: 0 },
-    duration: { type: Number, default: 0 },
-    isPlaying: { type: Boolean, default: false },
-    roomName: { type: String, default: 'Комната' },
+<script setup>
+import { ref, computed, onBeforeUnmount } from 'vue';
+import { formatTime, useProgressDrag, getHighResCover } from '@/composables/usePlayer';
+
+const props = defineProps({
+  title: { type: String, default: 'Название трека' },
+  artist: { type: String, default: 'Исполнитель' },
+  coverUrl: { type: String, default: '' },
+  currentTime: { type: Number, default: 0 },
+  duration: { type: Number, default: 0 },
+  isPlaying: { type: Boolean, default: false },
+  roomName: { type: String, default: 'Комната' },
+});
+
+const emit = defineEmits(['play', 'pause', 'prev', 'next', 'seek', 'show-queue']);
+
+// Local state
+const showFullPlayer = ref(false);
+const isLiked = ref(false);
+const progressTrack = ref(null);
+
+// Progress drag
+const { 
+  isDragging, 
+  dragPercent: dragProgress, 
+  startDrag: startProgressDrag 
+} = useProgressDrag(
+  progressTrack,
+  (percent) => {
+    const newTime = (percent / 100) * props.duration;
+    emit('seek', newTime);
   },
-  
-  emits: ['play', 'pause', 'prev', 'next', 'seek', 'show-queue'],
-  
-  data() {
-    return {
-      showFullPlayer: false,
-      isLiked: false,
-      isDragging: false,
-      dragProgress: 0,
-    };
-  },
-  
-  computed: {
-    progressPercent() {
-      if (this.isDragging) return this.dragProgress;
-      if (!this.duration) return 0;
-      return (this.currentTime / this.duration) * 100;
-    },
-    
-    /**
-     * Проверка длины названия - если больше 25 символов, включаем marquee
-     */
-    isLongTitle() {
-      return this.title && this.title.length > 25;
-    },
-    
-    /**
-     * Обложка высокого разрешения для полноэкранного режима
-     */
-    highResCoverUrl() {
-      if (!this.coverUrl) return '';
-      // Yandex Music cover URLs содержат размер, например: 100x100, 200x200
-      // Заменяем на 400x400 для высокого разрешения
-      return this.coverUrl.replace(/\d+x\d+/, '400x400');
-    }
-  },
-  
-  methods: {
-    formatTime(seconds) {
-      if (!seconds || !isFinite(seconds)) return '0:00';
-      const mins = Math.floor(seconds / 60);
-      const secs = Math.floor(seconds % 60);
-      return `${mins}:${secs.toString().padStart(2, '0')}`;
-    },
-    
-    togglePlay() {
-      if (this.isPlaying) {
-        this.$emit('pause');
-      } else {
-        this.$emit('play');
-      }
-    },
-    
-    prevTrack() {
-      this.$emit('prev');
-    },
-    
-    nextTrack() {
-      this.$emit('next');
-    },
-    
-    toggleLike() {
-      this.isLiked = !this.isLiked;
-    },
-    
-    openFullPlayer() {
-      this.showFullPlayer = true;
-      document.body.style.overflow = 'hidden';
-    },
-    
-    closeFullPlayer() {
-      this.showFullPlayer = false;
-      document.body.style.overflow = '';
-    },
-    
-    showQueue() {
-      this.closeFullPlayer();
-      this.$emit('show-queue');
-    },
-    
-    // Progress drag
-    startProgressDrag(e) {
-      this.isDragging = true;
-      this.updateDragProgress(e);
-      
-      document.addEventListener('mousemove', this.handleProgressDrag);
-      document.addEventListener('mouseup', this.stopProgressDrag);
-      document.addEventListener('touchmove', this.handleProgressDrag);
-      document.addEventListener('touchend', this.stopProgressDrag);
-    },
-    
-    handleProgressDrag(e) {
-      if (!this.isDragging) return;
-      this.updateDragProgress(e);
-    },
-    
-    updateDragProgress(e) {
-      const track = this.$refs.progressTrack;
-      if (!track) return;
-      
-      const rect = track.getBoundingClientRect();
-      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-      const x = Math.max(0, Math.min(clientX - rect.left, rect.width));
-      this.dragProgress = (x / rect.width) * 100;
-    },
-    
-    stopProgressDrag() {
-      if (!this.isDragging) return;
-      
-      const newTime = (this.dragProgress / 100) * this.duration;
-      this.$emit('seek', newTime);
-      
-      this.isDragging = false;
-      document.removeEventListener('mousemove', this.handleProgressDrag);
-      document.removeEventListener('mouseup', this.stopProgressDrag);
-      document.removeEventListener('touchmove', this.handleProgressDrag);
-      document.removeEventListener('touchend', this.stopProgressDrag);
-    }
-  },
-  
-  beforeUnmount() {
-    this.stopProgressDrag();
-    document.body.style.overflow = '';
-  }
+  true // with touch support
+);
+
+// Computed
+const progressPercent = computed(() => {
+  if (isDragging.value) return dragProgress.value;
+  if (!props.duration) return 0;
+  return (props.currentTime / props.duration) * 100;
+});
+
+const isLongTitle = computed(() => props.title && props.title.length > 25);
+
+const highResCoverUrl = computed(() => getHighResCover(props.coverUrl));
+
+// Methods
+const togglePlay = () => {
+  emit(props.isPlaying ? 'pause' : 'play');
 };
+
+const prevTrack = () => emit('prev');
+const nextTrack = () => emit('next');
+const toggleLike = () => { isLiked.value = !isLiked.value; };
+
+const openFullPlayer = () => {
+  showFullPlayer.value = true;
+  document.body.style.overflow = 'hidden';
+};
+
+const closeFullPlayer = () => {
+  showFullPlayer.value = false;
+  document.body.style.overflow = '';
+};
+
+const showQueue = () => {
+  closeFullPlayer();
+  emit('show-queue');
+};
+
+onBeforeUnmount(() => {
+  document.body.style.overflow = '';
+});
 </script>
 
 <style scoped>
@@ -523,6 +458,11 @@ export default {
 .playlist-name {
   font-size: 13px;
   font-weight: 600;
+  width: 150px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
   color: white;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
@@ -870,7 +810,7 @@ export default {
   
   .full-player-header {
     position: absolute;
-    top: 8px;
+    top: 5px;
     left: 12px;
     z-index: 10;
     padding: 0;
@@ -909,7 +849,7 @@ export default {
   .full-cover {
     max-width: none;
     width: auto;
-    height: calc(100vh - 40px);
+    height: calc(100vh - 60px);
     max-height: 300px;
     aspect-ratio: 1/1;
     border-radius: 12px;

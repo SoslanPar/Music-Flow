@@ -239,196 +239,174 @@
   </div>
 </template>
 
-<script>
-export default {
-  name: 'PlayerDesktop',
+<script setup>
+import { ref, computed, onBeforeUnmount } from 'vue';
+import { formatTime, useProgressDrag, useVolumeDrag, getHighResCover } from '@/composables/usePlayer';
+
+const props = defineProps({
+  title: { type: String, default: 'Название трека' },
+  artist: { type: String, default: 'Исполнитель' },
+  coverUrl: { type: String, default: '' },
+  currentTime: { type: Number, default: 0 },
+  duration: { type: Number, default: 0 },
+  volume: { type: Number, default: 1 },
+  isPlaying: { type: Boolean, default: false },
+  isLoading: { type: Boolean, default: false },
+});
+
+const emit = defineEmits(['play', 'pause', 'prev', 'next', 'seek', 'volume-change', 'toggle-queue', 'fullscreen']);
+
+// Local state
+const showQueue = ref(false);
+const showFullscreen = ref(false);
+const isMuted = ref(false);
+const prevVolume = ref(1);
+
+// Refs
+const progressBar = ref(null);
+const fsProgressBar = ref(null);
+const volumeSlider = ref(null);
+const fsVolumeSlider = ref(null);
+
+// Get active refs based on fullscreen state
+const getActiveProgressRef = () => showFullscreen.value ? fsProgressBar.value : progressBar.value;
+const getActiveVolumeRef = () => showFullscreen.value ? fsVolumeSlider.value : volumeSlider.value;
+
+// Progress drag
+const { 
+  isDragging: isProgressDragging, 
+  dragPercent: dragProgress, 
+  startDrag: startProgressDragBase,
+  cleanup: cleanupProgressDrag
+} = useProgressDrag(
+  { value: null }, // Dummy ref, we'll use custom ref getter
+  (percent) => {
+    const newTime = (percent / 100) * props.duration;
+    emit('seek', newTime);
+  }
+);
+
+// Volume drag
+const {
+  isDragging: isVolumeDragging,
+  dragValue: dragVolume,
+  startDrag: startVolumeDragBase,
+  cleanup: cleanupVolumeDrag
+} = useVolumeDrag(
+  { value: null },
+  (vol) => {
+    isMuted.value = false;
+    emit('volume-change', vol);
+  }
+);
+
+// Custom start drag functions that use active refs
+const startProgressDrag = (e) => {
+  const activeRef = getActiveProgressRef();
+  if (!activeRef) return;
   
-  props: {
-    title: { type: String, default: 'Название трека' },
-    artist: { type: String, default: 'Исполнитель' },
-    coverUrl: { type: String, default: '' },
-    currentTime: { type: Number, default: 0 },
-    duration: { type: Number, default: 0 },
-    volume: { type: Number, default: 1 },
-    isPlaying: { type: Boolean, default: false },
-    isLoading: { type: Boolean, default: false },
-  },
+  isProgressDragging.value = true;
+  updateProgressFromEvent(e, activeRef);
   
-  emits: ['play', 'pause', 'prev', 'next', 'seek', 'volume-change', 'toggle-queue', 'fullscreen'],
+  const handleMove = (e) => {
+    if (!isProgressDragging.value) return;
+    requestAnimationFrame(() => updateProgressFromEvent(e, activeRef));
+  };
   
-  data() {
-    return {
-      showQueue: false,
-      showFullscreen: false,
-      isMuted: false,
-      prevVolume: 1,
-      
-      // Drag states
-      isProgressDragging: false,
-      isVolumeDragging: false,
-      dragProgress: 0,
-      dragVolume: 0,
-    };
-  },
+  const handleEnd = () => {
+    if (!isProgressDragging.value) return;
+    const newTime = (dragProgress.value / 100) * props.duration;
+    emit('seek', newTime);
+    isProgressDragging.value = false;
+    document.removeEventListener('mousemove', handleMove);
+    document.removeEventListener('mouseup', handleEnd);
+  };
   
-  computed: {
-    progressPercent() {
-      if (this.isProgressDragging) return this.dragProgress;
-      if (!this.duration) return 0;
-      return (this.currentTime / this.duration) * 100;
-    },
-    
-    volumePercent() {
-      if (this.isVolumeDragging) return this.dragVolume * 100;
-      return (this.isMuted ? 0 : this.volume) * 100;
-    },
-    
-    /**
-     * Проверка длины названия - если больше 30 символов, включаем marquee
-     */
-    isLongTitle() {
-      return this.title && this.title.length > 25;
-    },
-    
-    /**
-     * Обложка высокого разрешения для полноэкранного режима
-     */
-    highResCoverUrl() {
-      if (!this.coverUrl) return '';
-      // Yandex Music cover URLs содержат размер, например: 100x100, 200x200
-      // Заменяем на 400x400 для высокого разрешения
-      return this.coverUrl.replace(/\d+x\d+/, '400x400');
-    }
-  },
+  document.addEventListener('mousemove', handleMove);
+  document.addEventListener('mouseup', handleEnd);
+};
+
+const updateProgressFromEvent = (e, element) => {
+  const rect = element.getBoundingClientRect();
+  const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+  dragProgress.value = (x / rect.width) * 100;
+};
+
+const startVolumeDrag = (e) => {
+  const activeRef = getActiveVolumeRef();
+  if (!activeRef) return;
   
-  methods: {
-    formatTime(seconds) {
-      if (!seconds || !isFinite(seconds)) return '0:00';
-      const mins = Math.floor(seconds / 60);
-      const secs = Math.floor(seconds % 60);
-      return `${mins}:${secs.toString().padStart(2, '0')}`;
-    },
-    
-    togglePlay() {
-      if (this.isPlaying) {
-        this.$emit('pause');
-      } else {
-        this.$emit('play');
-      }
-    },
-    
-    prevTrack() {
-      this.$emit('prev');
-    },
-    
-    nextTrack() {
-      this.$emit('next');
-    },
-    
-    toggleQueue() {
-      this.showQueue = !this.showQueue;
-      this.$emit('toggle-queue', this.showQueue);
-    },
-    
-    toggleMute() {
-      if (this.isMuted) {
-        this.isMuted = false;
-        this.$emit('volume-change', this.prevVolume);
-      } else {
-        this.prevVolume = this.volume;
-        this.isMuted = true;
-        this.$emit('volume-change', 0);
-      }
-    },
-    
-    toggleFullscreen() {
-      this.showFullscreen = !this.showFullscreen;
-      if (this.showFullscreen) {
-        document.body.style.overflow = 'hidden';
-      } else {
-        document.body.style.overflow = '';
-      }
-      this.$emit('fullscreen', this.showFullscreen);
-    },
-    
-    // ========== Progress Drag ==========
-    startProgressDrag(e) {
-      this.isProgressDragging = true;
-      this.updateDragProgress(e);
-      
-      document.addEventListener('mousemove', this.handleProgressDrag);
-      document.addEventListener('mouseup', this.stopProgressDrag);
-    },
-    
-    handleProgressDrag(e) {
-      if (!this.isProgressDragging) return;
-      requestAnimationFrame(() => this.updateDragProgress(e));
-    },
-    
-    updateDragProgress(e) {
-      // В fullscreen режиме fsProgressBar должен быть приоритетнее
-      const bar = this.showFullscreen ? this.$refs.fsProgressBar : this.$refs.progressBar;
-      if (!bar) return;
-      
-      const rect = bar.getBoundingClientRect();
-      const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
-      this.dragProgress = (x / rect.width) * 100;
-    },
-    
-    stopProgressDrag() {
-      if (!this.isProgressDragging) return;
-      
-      const newTime = (this.dragProgress / 100) * this.duration;
-      this.$emit('seek', newTime);
-      
-      this.isProgressDragging = false;
-      document.removeEventListener('mousemove', this.handleProgressDrag);
-      document.removeEventListener('mouseup', this.stopProgressDrag);
-    },
-    
-    // ========== Volume Drag ==========
-    startVolumeDrag(e) {
-      this.isVolumeDragging = true;
-      this.isMuted = false;
-      this.updateVolumeFromEvent(e);
-      
-      document.addEventListener('mousemove', this.handleVolumeDrag);
-      document.addEventListener('mouseup', this.stopVolumeDrag);
-    },
-    
-    handleVolumeDrag(e) {
-      if (!this.isVolumeDragging) return;
-      requestAnimationFrame(() => this.updateVolumeFromEvent(e));
-    },
-    
-    updateVolumeFromEvent(e) {
-      // Проверяем оба ref - обычный и fullscreen
-      // В fullscreen режиме fsVolumeSlider должен быть приоритетнее
-      const slider = this.showFullscreen ? this.$refs.fsVolumeSlider : this.$refs.volumeSlider;
-      if (!slider) return;
-      
-      const rect = slider.getBoundingClientRect();
-      const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
-      this.dragVolume = x / rect.width;
-      
-      // Emit immediately for real-time feedback
-      this.$emit('volume-change', this.dragVolume);
-    },
-    
-    stopVolumeDrag() {
-      if (!this.isVolumeDragging) return;
-      
-      this.isVolumeDragging = false;
-      document.removeEventListener('mousemove', this.handleVolumeDrag);
-      document.removeEventListener('mouseup', this.stopVolumeDrag);
-    }
-  },
+  isVolumeDragging.value = true;
+  isMuted.value = false;
+  updateVolumeFromEvent(e, activeRef);
   
-  beforeUnmount() {
-    this.stopProgressDrag();
-    this.stopVolumeDrag();
+  const handleMove = (e) => {
+    if (!isVolumeDragging.value) return;
+    requestAnimationFrame(() => updateVolumeFromEvent(e, activeRef));
+  };
+  
+  const handleEnd = () => {
+    isVolumeDragging.value = false;
+    document.removeEventListener('mousemove', handleMove);
+    document.removeEventListener('mouseup', handleEnd);
+  };
+  
+  document.addEventListener('mousemove', handleMove);
+  document.addEventListener('mouseup', handleEnd);
+};
+
+const updateVolumeFromEvent = (e, element) => {
+  const rect = element.getBoundingClientRect();
+  const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+  dragVolume.value = x / rect.width;
+  emit('volume-change', dragVolume.value);
+};
+
+// Computed
+const progressPercent = computed(() => {
+  if (isProgressDragging.value) return dragProgress.value;
+  if (!props.duration) return 0;
+  return (props.currentTime / props.duration) * 100;
+});
+
+const volumePercent = computed(() => {
+  if (isVolumeDragging.value) return dragVolume.value * 100;
+  return (isMuted.value ? 0 : props.volume) * 100;
+});
+
+const isLongTitle = computed(() => props.title && props.title.length > 25);
+const highResCoverUrl = computed(() => getHighResCover(props.coverUrl));
+
+// Methods
+const togglePlay = () => emit(props.isPlaying ? 'pause' : 'play');
+const prevTrack = () => emit('prev');
+const nextTrack = () => emit('next');
+
+const toggleQueue = () => {
+  showQueue.value = !showQueue.value;
+  emit('toggle-queue', showQueue.value);
+};
+
+const toggleMute = () => {
+  if (isMuted.value) {
+    isMuted.value = false;
+    emit('volume-change', prevVolume.value);
+  } else {
+    prevVolume.value = props.volume;
+    isMuted.value = true;
+    emit('volume-change', 0);
   }
 };
+
+const toggleFullscreen = () => {
+  showFullscreen.value = !showFullscreen.value;
+  document.body.style.overflow = showFullscreen.value ? 'hidden' : '';
+  emit('fullscreen', showFullscreen.value);
+};
+
+onBeforeUnmount(() => {
+  document.body.style.overflow = '';
+});
 </script>
 
 <style scoped>

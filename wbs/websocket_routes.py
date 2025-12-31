@@ -9,7 +9,8 @@ class WebSocketRoutes:
         self.manager = manager
         self.message_queues = {}
         self.time_responses = {}
-        self.last_track_change = 0
+        # Время последнего переключения трека по комнатам
+        self.last_track_change = {}
 
     async def handle_websocket(self, websocket: WebSocket, room_id: str, user_id: str):
         try:
@@ -281,9 +282,12 @@ class WebSocketRoutes:
                     })
         elif msg_type == "next_track":
             current_time = time.time()
-            # if hasattr(self, 'last_track_change') and current_time - self.last_track_change < 4.0:
-            #     return
-            self.last_track_change = current_time
+            # Защита от дублирующих запросов (2 секунды)
+            if room_id in self.last_track_change and current_time - self.last_track_change[room_id] < 2.0:
+                print(f"[WS] Ignoring duplicate next_track from {user_id}")
+                return
+            self.last_track_change[room_id] = current_time
+            
             room_state = await self.manager.get_room_state(room_id)
             new_index = (room_state['index_track'] + 1) % len(room_state['list_track'])
             await self.manager.update_room_state(room_id, {
@@ -298,6 +302,13 @@ class WebSocketRoutes:
                     'index': new_index
                 })
         elif msg_type == "previous_track":
+            current_time = time.time()
+            # Защита от дублирующих запросов (2 секунды)
+            if room_id in self.last_track_change and current_time - self.last_track_change[room_id] < 2.0:
+                print(f"[WS] Ignoring duplicate previous_track from {user_id}")
+                return
+            self.last_track_change[room_id] = current_time
+            
             room_state = await self.manager.get_room_state(room_id)
             # if room_state['time_moment'] > 5:
             #     await self.manager.update_room_state(room_id, {

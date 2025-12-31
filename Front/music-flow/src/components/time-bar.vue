@@ -22,94 +22,34 @@
 </template>
 
 
-<script>
-export default {
-  props: {
-    currentTime: {
-      type: Number,
-      required: true,
-    },
-    duration: {
-      type: Number,
-      required: true,
-    },
+<script setup>
+import { ref, computed } from 'vue';
+import { formatTime, useProgressDrag } from '@/composables/usePlayer';
+
+const props = defineProps({
+  currentTime: { type: Number, required: true },
+  duration: { type: Number, required: true },
+});
+
+const emit = defineEmits(['seek']);
+const progressContainer = ref(null);
+
+const { isDragging, dragPercent, startDrag } = useProgressDrag(
+  progressContainer,
+  (percent) => {
+    if (!isFinite(props.duration) || props.duration === 0) return;
+    const newTime = (percent / 100) * props.duration;
+    emit('seek', newTime);
   },
-  data() {
-    return {
-      isDragging: false,
-      dragPercent: 0,
-    };
-  },
-  computed: {
-    progressPercent() {
-      if (!this.duration || this.duration === 0) return 0;
-      return Math.min(100, Math.max(0, (this.currentTime / this.duration) * 100));
-    },
-    displayPercent() {
-      return this.isDragging ? this.dragPercent : this.progressPercent;
-    }
-  },
-  methods: {
-    formatTime(seconds) {
-      if (!seconds || !isFinite(seconds)) return '0:00';
-      const minutes = Math.floor(seconds / 60);
-      const remainingSeconds = Math.floor(seconds % 60);
-      return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
-    },
-    
-    getPercentFromEvent(e) {
-      const container = this.$refs.progressContainer;
-      if (!container) return 0;
-      
-      const rect = container.getBoundingClientRect();
-      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-      const x = Math.max(0, Math.min(clientX - rect.left, rect.width));
-      return (x / rect.width) * 100;
-    },
-    
-    startDrag(e) {
-      if (!isFinite(this.duration) || this.duration === 0) return;
-      
-      e.preventDefault();
-      this.isDragging = true;
-      this.dragPercent = this.getPercentFromEvent(e);
-      
-      // Сразу применяем позицию
-      const newTime = (this.dragPercent / 100) * this.duration;
-      this.$emit('seek', newTime);
-      
-      document.addEventListener('mousemove', this.handleDrag);
-      document.addEventListener('mouseup', this.stopDrag);
-      document.addEventListener('touchmove', this.handleDrag);
-      document.addEventListener('touchend', this.stopDrag);
-    },
-    
-    handleDrag(e) {
-      if (!this.isDragging) return;
-      
-      // Use requestAnimationFrame for smoother updates
-      requestAnimationFrame(() => {
-        if (!this.isDragging) return;
-        this.dragPercent = this.getPercentFromEvent(e);
-        const newTime = (this.dragPercent / 100) * this.duration;
-        this.$emit('seek', newTime);
-      });
-    },
-    
-    stopDrag() {
-      if (!this.isDragging) return;
-      
-      this.isDragging = false;
-      document.removeEventListener('mousemove', this.handleDrag);
-      document.removeEventListener('mouseup', this.stopDrag);
-      document.removeEventListener('touchmove', this.handleDrag);
-      document.removeEventListener('touchend', this.stopDrag);
-    },
-  },
-  beforeUnmount() {
-    this.stopDrag();
-  }
-};
+  true // with touch support
+);
+
+const progressPercent = computed(() => {
+  if (!props.duration || props.duration === 0) return 0;
+  return Math.min(100, Math.max(0, (props.currentTime / props.duration) * 100));
+});
+
+const displayPercent = computed(() => isDragging.value ? dragPercent.value : progressPercent.value);
 </script>
 
 

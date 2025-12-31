@@ -17,11 +17,8 @@ const loadYandexSdk = () => {
 };
 
 onMounted(async () => {
-  console.log('YandexCallback mounted. Parsing token...');
-
   const params = new URLSearchParams(window.location.search);
   const token = params.get('code');
-  console.log('YandexCallback — code:', token);
 
   if (!token) {
     console.error('Код авторизации не найден в URL');
@@ -40,13 +37,10 @@ onMounted(async () => {
 
   try {
     await loadYandexSdk();
-    console.log('Yandex SDK загружен. Вызываем YaSendSuggestToken...');
 
     window.YaSendSuggestToken(window.location.origin, {
       token: token
     });
-
-    console.log('YaSendSuggestToken отправлен.');
   } catch (e) {
     console.error('Ошибка при работе с Yandex SDK:', e);
   }

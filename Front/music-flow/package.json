@@ -9,10 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "axios": "^1.8.4",
     "gsap": "^3.12.7",
-    "pinia": "^3.0.2",
-    "tailwind": "^2.3.1",
+    "pinia": "^3.0.4",
     "vue": "^3.5.13",
     "vue-router": "^4.5.1"
   },

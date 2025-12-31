@@ -99,7 +99,6 @@ export async function loadAudioStream(audioElement, streamUrl, knownDuration = n
     const timeout = document.hidden ? 1000 : 5000;
     timeoutId = setTimeout(() => {
       if (!resolved) {
-        console.log('Audio load timeout, resolving with known duration');
         resolveOnce(knownDuration);
       }
     }, timeout);
@@ -155,7 +154,7 @@ export function syncPlayback(audioElement, playing, position) {
   }
 
   if (playing && audioElement.paused) {
-    audioElement.play().catch(e => console.log('Play error:', e));
+    audioElement.play().catch(() => {});
     return true;
   } else if (!playing && !audioElement.paused) {
     audioElement.pause();

@@ -1001,7 +1001,12 @@ export default {
 
 .room-title {
   font-size: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100px;
   font-weight: 500;
+  text-align: center;
   color: white;
 }
 
@@ -1112,6 +1117,10 @@ export default {
     -webkit-backdrop-filter: blur(4px);
     z-index: 140;
     animation: fadeIn 0.2s ease;
+  }
+
+  .header-logo-full {
+    display: none;
   }
   
   @keyframes fadeIn {

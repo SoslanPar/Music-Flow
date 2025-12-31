@@ -7,12 +7,9 @@ const retryCount = ref(0);
 const MAX_RETRIES = 3;
 
 const loadYandexSDK = () => {
-  console.log('[YandexAuth] Starting SDK loading...');
-  
   return new Promise((resolve, reject) => {
     // Проверяем, может SDK уже загружен
     if (window.YaAuthSuggest) {
-      console.log('[YandexAuth] SDK already loaded');
       return resolve();
     }
 
@@ -22,7 +19,6 @@ const loadYandexSDK = () => {
     );
 
     if (existingScript) {
-      console.log('[YandexAuth] Existing script found, waiting for load');
       existingScript.onload = () => resolve();
       existingScript.onerror = () => reject(new Error('Script load error'));
       return;
@@ -38,7 +34,6 @@ const loadYandexSDK = () => {
         reject(new Error('SDK not available after load'));
         return;
       }
-      console.log('[YandexAuth] Script loaded successfully');
       resolve();
     };
 
@@ -46,7 +41,6 @@ const loadYandexSDK = () => {
       reject(new Error('Failed to load script'));
     };
 
-    console.log('[YandexAuth] Appending script to head');
     document.head.appendChild(script);
   });
 };
@@ -57,10 +51,6 @@ const initYandexAuth = async () => {
     isLoading.value = true;
     
     await loadYandexSDK();
-    
-    console.log('[YandexAuth] Initializing button...');
-    console.log('Client ID:', import.meta.env.VITE_CLIENT_ID);
-    console.log('Redirect URI:', `${window.location.origin}/yandex-callback`);
 
     const result = await window.YaAuthSuggest.init(
       {
@@ -83,23 +73,18 @@ const initYandexAuth = async () => {
       throw new Error('Init failed: ' + result.status);
     }
 
-    console.log('[YandexAuth] Button initialized, handling auth...');
     const data = await result.handler();
     
-    console.log('[YandexAuth] Auth success:', data);
-    console.log(window.location.origin);
     window.postMessage({
       type: 'yandex_auth_success',
       code: data.code
     }, window.location.origin);
     
   } catch (err) {
-    console.error('[YandexAuth] Error:', err);
     error.value = `Ошибка: ${err.message}`;
     
     if (retryCount.value < MAX_RETRIES) {
       retryCount.value++;
-      console.log(`[YandexAuth] Retrying (${retryCount.value}/${MAX_RETRIES})...`);
       setTimeout(initYandexAuth, 2000);
       return;
     }
@@ -111,7 +96,6 @@ const initYandexAuth = async () => {
 };
 
 const renderFallbackButton = () => {
-  console.log('[YandexAuth] Rendering fallback button');
   const container = document.getElementById('yandex-auth-button');
   if (!container) return;
   
@@ -132,14 +116,12 @@ const retry = () => {
 };
 
 onMounted(() => {
-  console.log('[YandexAuth] Component mounted');
   initYandexAuth();
 });
 
 // Обработчик ошибок браузера
 window.addEventListener('error', (event) => {
   if (event.message.includes('cookie') || event.message.includes('third-party')) {
-    console.warn('[YandexAuth] Cookie blocking detected');
     error.value = 'Пожалуйста, разрешите сторонние куки в настройках браузера';
   }
 });
