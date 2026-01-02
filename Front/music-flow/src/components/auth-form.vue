@@ -373,10 +373,29 @@ async function handleSubmit() {
   .login-bottom-text {
     font-size: 12px;
   }
+
+  .form-fields {
+    margin: 0;
+  }
+
+  .form-button {
+    margin: 0;
+  }
+
+  .form-button :deep(.button) {
+    font-size: clamp(12px, 2.5vh, 16px) !important;
+    padding: clamp(8px, 2vh, 12px) clamp(16px, 3.5vw, 30px) !important;
+    width: 200px;
+  }
+
+  .yandex-auth-wrapper {
+    padding: 10px;
+    margin: 0;
+  }
 }
 
 /* Очень маленькие экраны */
-@media (max-width: 360px) {
+@media (max-width: 380px) {
   .auth-form {
     padding: 18px 14px;
     border-radius: 18px;
@@ -396,12 +415,12 @@ async function handleSubmit() {
 /* Горизонтальная ориентация на мобильных */
 @media (max-height: 600px) and (orientation: landscape) {
   .auth-form {
-    padding: clamp(10px, 2.5vh, 20px) clamp(14px, 3.5vw, 24px);
-    gap: clamp(6px, 1.5vh, 12px);
+    padding: clamp(8px, 4vh, 24px);
+    gap: clamp(6px, 4vh, 24px);
     max-width: 100%;
     border-radius: clamp(14px, 3vh, 24px);
-    max-height: calc(100vh - 20px);
-    max-height: calc(100dvh - 20px);
+    max-width: clamp(180px, 40vw, 320px);
+    margin: 0 auto;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
   }
@@ -412,12 +431,14 @@ async function handleSubmit() {
   }
   
   .form-fields {
-    gap: clamp(6px, 1.5vh, 10px);
+    gap: clamp(4px, 1vw, 10px);
+    max-width: clamp(160px, 32vw, 260px);
+    padding: 0 clamp(4px, 2vw, 12px);
   }
   
   .auth-input {
-    padding: clamp(8px, 2vh, 12px) clamp(12px, 2.5vw, 18px);
-    font-size: clamp(12px, 2vh, 14px);
+    padding: clamp(4px, 1vw, 8px) clamp(8px, 2vw, 14px);
+    font-size: clamp(11px, 1.5vw, 13px);
   }
   
   .error-message,

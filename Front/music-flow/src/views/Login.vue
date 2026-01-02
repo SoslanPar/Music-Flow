@@ -354,7 +354,7 @@ function toggleForm() {
   
   .logo-section {
     flex: none;
-    padding: 55px 15px 10px 15px;
+    padding: 10px 15px 5px 15px;
   }
   
   .login-logo {
@@ -362,7 +362,8 @@ function toggleForm() {
   }
   
   .logo-tagline {
-    font-size: 0.95rem;
+    /* font-size: 0.95rem; */
+    display: none;
   }
   
   .form-section {
@@ -408,7 +409,7 @@ function toggleForm() {
   .login-page {
     min-height: 100vh;
     min-height: 100dvh;
-    overflow-y: auto;
+    overflow-y: hidden;
     overflow-x: hidden;
   }
   
@@ -416,39 +417,49 @@ function toggleForm() {
     flex-direction: row;
     align-items: center;
     justify-content: center;
-    gap: clamp(1.5rem, 5vw, 4rem);
-    padding: 10px clamp(15px, 4vw, 50px);
+    gap: clamp(1rem, 3vw, 2rem); 
+    padding: 10px clamp(10px, 2vw, 30px);
     min-height: 100vh;
     min-height: 100dvh;
   }
   
   .logo-section {
-    flex: 0 0 auto;
-    padding: 10px;
-    max-width: 35vw;
+    flex: 1 1 auto;
+    padding: 0;
+    max-width: 60vw;
+    height: 100vh;
+    min-height: 100dvh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
   
   .logo-wrapper {
-    gap: 0.5rem;
+    gap: 1.5rem;
   }
   
   .login-logo {
-    width: clamp(100px, 20vh, 180px);
+    width: 90%;
+    max-width: 600px;
+    min-width: 250px;
+    height: auto;
+    display: block;
+    margin: 0 auto;
   }
   
   .logo-tagline {
-    font-size: clamp(0.75rem, 2vh, 1rem);
+    font-size: clamp(1.1rem, 3vh, 1.5rem);
   }
   
   .form-section {
-    flex: 0 1 auto;
+    flex: 1 1 auto;
     padding: 10px;
     align-items: center;
-    max-width: 55vw;
+    max-width: 65vw;
   }
   
   .form-wrapper {
-    max-width: clamp(260px, 45vw, 380px);
+    max-width: clamp(300px, 50vw, 450px);
     width: 100%;
   }
   
