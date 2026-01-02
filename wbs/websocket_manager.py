@@ -22,6 +22,14 @@ class ConnectionManager:
     async def disconnect(self, room_id: str, user_id: str):
         if room_id in self.active_connections and user_id in self.active_connections[room_id]:
             del self.active_connections[room_id][user_id]
+            
+            # Сохраняем текущее время в БД при выходе пользователя
+            # Запрашиваем время у оставшихся участников
+            remaining_users = list(self.active_connections.get(room_id, {}).keys())
+            if remaining_users:
+                # Есть другие участники - запросим у них время позже
+                pass
+            
             await self.update_participants(room_id)
                 
 

@@ -489,6 +489,14 @@ onBeforeUnmount(() => {
   transition: box-shadow 0.8s ease;
 }
 
+@media (max-height: 750px) {
+  .full-cover {
+    width: 100%;
+    max-width: 285px;
+  }
+  
+}
+
 .full-cover.playing {
   box-shadow: 
     0 20px 80px rgba(99, 58, 137, 0.35),

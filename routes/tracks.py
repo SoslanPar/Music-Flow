@@ -290,6 +290,171 @@ async def stream_audio_secure(token: str, request: Request):
 
 
 # Оставляем старый эндпоинт для обратной совместимости, но помечаем как deprecated
+@router.get("/search")
+async def search_tracks(query: str, limit: int = 10):
+    """
+    Поиск треков по названию в Yandex Music.
+    Возвращает список треков с метаданными и URL.
+    """
+    try:
+        loop = asyncio.get_event_loop()
+        client = get_yandex_client()
+        
+        # Выполняем поиск в отдельном потоке
+        search_result = await loop.run_in_executor(
+            executor, 
+            lambda: client.search(query, type_='track')
+        )
+        
+        if not search_result or not search_result.tracks:
+            return {"results": []}
+        
+        tracks = search_result.tracks.results[:limit]
+        results = []
+        
+        for track in tracks:
+            try:
+                track_url = f"https://music.yandex.ru/track/{track.id}"
+                results.append({
+                    "id": str(track.id),
+                    "title": track.title,
+                    "artist": ", ".join(artist.name for artist in track.artists) if track.artists else "Unknown",
+                    "cover": f"https://{track.cover_uri.replace('%%', '200x200')}" if track.cover_uri else None,
+                    "duration": track.duration_ms / 1000 if track.duration_ms else None,
+                    "url": track_url
+                })
+            except Exception as e:
+                print(f"Error processing track {track.id}: {e}")
+                continue
+        
+        return {"results": results}
+        
+    except Exception as e:
+        print(f"Search error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+
+
+@router.get("/playlist")
+async def get_playlist_tracks(url: str, limit: int = 50):
+    """
+    Получить треки из плейлиста Yandex Music.
+    Поддерживает ссылки вида:
+    - https://music.yandex.ru/users/{user}/playlists/{id}
+    - https://music.yandex.ru/album/{id}
+    """
+    try:
+        loop = asyncio.get_event_loop()
+        client = get_yandex_client()
+        
+        tracks_data = []
+        
+        # Определяем тип ссылки
+        if "/users/" in url and "/playlists/" in url:
+            # Плейлист пользователя
+            parts = url.split("/users/")[1].split("/playlists/")
+            user_id = parts[0]
+            playlist_id = parts[1].split("/")[0].split("?")[0]
+            
+            playlist = await loop.run_in_executor(
+                executor,
+                lambda: client.users_playlists(playlist_id, user_id)
+            )
+            
+            if playlist and playlist.tracks:
+                for track_short in playlist.tracks[:limit]:
+                    try:
+                        track = track_short.track
+                        if track:
+                            track_url = f"https://music.yandex.ru/track/{track.id}"
+                            tracks_data.append({
+                                "id": str(track.id),
+                                "title": track.title,
+                                "artist": ", ".join(artist.name for artist in track.artists) if track.artists else "Unknown",
+                                "cover": f"https://{track.cover_uri.replace('%%', '200x200')}" if track.cover_uri else None,
+                                "duration": track.duration_ms / 1000 if track.duration_ms else None,
+                                "url": track_url
+                            })
+                    except Exception as e:
+                        print(f"Error processing playlist track: {e}")
+                        continue
+                        
+        elif "/album/" in url:
+            # Альбом
+            album_id = url.split("/album/")[1].split("/")[0].split("?")[0]
+            
+            album = await loop.run_in_executor(
+                executor,
+                lambda: client.albums_with_tracks(album_id)
+            )
+            
+            if album and album.volumes:
+                for volume in album.volumes:
+                    for track in volume[:limit]:
+                        try:
+                            track_url = f"https://music.yandex.ru/track/{track.id}"
+                            tracks_data.append({
+                                "id": str(track.id),
+                                "title": track.title,
+                                "artist": ", ".join(artist.name for artist in track.artists) if track.artists else "Unknown",
+                                "cover": f"https://{track.cover_uri.replace('%%', '200x200')}" if track.cover_uri else None,
+                                "duration": track.duration_ms / 1000 if track.duration_ms else None,
+                                "url": track_url
+                            })
+                        except Exception as e:
+                            print(f"Error processing album track: {e}")
+                            continue
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported URL format. Use playlist or album links.")
+        
+        return {
+            "tracks": tracks_data,
+            "count": len(tracks_data)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Playlist error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch playlist: {str(e)}")
+
+
+@router.post("/batch_info")
+async def get_batch_track_info(track_urls: list[str]):
+    """
+    Получить информацию о нескольких треках одновременно.
+    Пропускает треки, которые не удалось обработать.
+    """
+    try:
+        results = []
+        
+        for url in track_urls:
+            try:
+                clean_url = url.split("?")[0]
+                if "track/" not in clean_url:
+                    continue
+                    
+                track_id = clean_url.split("track/")[1].split("/")[0]
+                metadata = await get_track_metadata_cached(track_id, OAUTH_TOKEN)
+                direct_url, mime_type = await _get_direct_link_cached(track_id)
+                
+                results.append({
+                    **metadata,
+                    "stream_url": direct_url,
+                    "track_id": track_id,
+                    "url": url,
+                    "mime_type": mime_type
+                })
+            except Exception as e:
+                print(f"Error processing track {url}: {e}")
+                continue
+        
+        return {"tracks": results, "count": len(results)}
+        
+    except Exception as e:
+        print(f"Batch info error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Batch processing failed: {str(e)}")
+
+
 @router.get("/stream")
 async def stream_audio(url: str, request: Request, user_id: str):
     """Стриминг аудио трека"""

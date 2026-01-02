@@ -174,13 +174,87 @@ async def create_room(
         return Response(
             content=json.dumps({"Status": "Error", "Message": str(e)}), status_code=500
         )
-    done = await resp.get_all()
-    # print(done)
-    return Response(content=json.dumps(done), status_code=200)
+    
+    # Возвращаем только созданную комнату
+    return Response(
+        content=json.dumps({
+            "Status": "Success", 
+            "room": {
+                "id": str(done["id"]),
+                "name": name_rooms
+            }
+        }), 
+        status_code=200
+    )
 
 @router.get("/{room_id}/join")
 async def join_room(room_id: str, request: Request):
     return RedirectResponse(f"/room/{room_id}")
+
+
+@router.post("/{room_id}/join")
+async def join_room_by_id(room_id: str, request: Request):
+    """
+    Присоединиться к комнате по ID и добавить её в список комнат пользователя
+    """
+    cookies = request.cookies
+    if "user_id" not in cookies or not cookies["user_id"]:
+        raise HTTPException(status_code=401, detail="Авторизуйтесь")
+    
+    user_id = cookies["user_id"]
+    
+    try:
+        # Проверяем существование комнаты
+        async with db.session_factory() as session:
+            room = await session.get(Rooms, room_id)
+            if not room:
+                raise HTTPException(status_code=404, detail="Комната не найдена")
+            
+            room_name = room.name_room
+        
+        # Добавляем комнату пользователю
+        user_model = UserServices(db)
+        await user_model.add_room(room_id, user_id)
+        
+        return JSONResponse(content={
+            'status': 'success',
+            'room_id': room_id,
+            'room_name': room_name
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error joining room: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/{room_id}/leave")
+async def leave_room_from_list(room_id: str, request: Request):
+    """
+    Удалить комнату из списка комнат пользователя (не удаляет саму комнату)
+    """
+    cookies = request.cookies
+    if "user_id" not in cookies or not cookies["user_id"]:
+        raise HTTPException(status_code=401, detail="Авторизуйтесь")
+    
+    user_id = cookies["user_id"]
+    
+    try:
+        user_model = UserServices(db)
+        result = await user_model.remove_room(room_id, user_id)
+        
+        if result:
+            return JSONResponse(content={
+                'status': 'success',
+                'message': 'Комната удалена из списка'
+            })
+        else:
+            raise HTTPException(status_code=404, detail="Комната не найдена в списке")
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error removing room: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/{room_id}/queue")

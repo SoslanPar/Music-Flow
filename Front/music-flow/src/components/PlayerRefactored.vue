@@ -34,7 +34,8 @@
           <TimeBar 
             :currentTime="currentTime" 
             :duration="duration" 
-            @seek="onSeek" 
+            @seek="onSeekLocal" 
+            @seek-end="onSeekCommit"
             ref="timeBar" 
           />
 
@@ -146,6 +147,8 @@ export default {
   },
 
   async mounted() {
+    console.log('[AudioPlayer] Mounted with roomId:', this.roomId);
+    
     this.currentAudio = this.$refs.audioElement;
     
     if (!this.currentAudio) {
@@ -175,6 +178,8 @@ export default {
   },
 
   beforeUnmount() {
+    console.log('[AudioPlayer] Unmounting, roomId was:', this.roomId);
+    
     if (this.socket) {
       this.socket.close(1000, "Page closed");
       this.socket = null;
@@ -528,6 +533,30 @@ export default {
       }
     },
 
+    // Локальный seek (во время перетаскивания) - только локальное обновление + broadcast
+    async onSeekLocal(currentTime) {
+      if (!this.isSyncing && this.currentAudio) {
+        this.currentAudio.currentTime = currentTime;
+        // Отправляем другим участникам без сохранения в БД
+        sendSocketMessage(this.socket, {
+          type: 'seek',
+          position: currentTime
+        });
+      }
+    },
+
+    // Финальный seek (когда отпустил ползунок) - сохраняем в БД
+    async onSeekCommit(currentTime) {
+      if (!this.isSyncing && this.currentAudio) {
+        this.currentAudio.currentTime = currentTime;
+        // Сохраняем финальную позицию в БД
+        sendSocketMessage(this.socket, {
+          type: 'seek_commit',
+          position: currentTime
+        });
+      }
+    },
+
     async sendSeekCommand(position) {
       sendSocketMessage(this.socket, {
         type: 'seek',
@@ -642,17 +671,25 @@ export default {
           break;
 
         case 'init':
+          // Всегда загружаем очередь для синхронизации состояния
+          const queueData = await fetchQueue(this.roomId);
+          this.updateTracksList(queueData.list_track || [], queueData.index || 0);
+          
+          // Инициализируем ожидаемый индекс
+          this.expectedTrackIndex = queueData.index || 0;
+          
+          // Загружаем трек только если он есть
           if (data.track_url) {
-            const queueData = await fetchQueue(this.roomId);
-            this.updateTracksList(queueData.list_track, queueData.index);
-            
-            // Инициализируем ожидаемый индекс
-            this.expectedTrackIndex = queueData.index;
-            
             await this.loadTrack(data.track_url, {
               autoPlay: data.is_playing,
               startTime: data.current_time || 0
             });
+          } else {
+            // Для пустой комнаты сбрасываем состояние плеера
+            this.isLoading = false;
+            this.isInitialLoad = false;
+            this.currentTrackTitle = 'Добавьте треки';
+            this.currentArtist = '';
           }
           break;
 
@@ -815,11 +852,20 @@ export default {
           break;
 
         case 'track_removed':
-          // Обработка удаления трека - удаляем по индексу из локального массива
+          // Обработка удаления трека - обновляем локальный массив
           if (data.removed_index !== undefined && this.list_tracks.length > 0) {
             // Удаляем элемент из локального массива метаданных
             this.list_tracks.splice(data.removed_index, 1);
             this.currentTrackIndex = data.index;
+            
+            // Если удалили текущий трек - нужно загрузить новый
+            if (data.removed_current && this.list_tracks.length > 0) {
+              const newTrackUrl = this.list_tracks[data.index]?.url || this.list_tracks[data.index];
+              if (newTrackUrl) {
+                await this.loadTrack(newTrackUrl, { autoPlay: this.isPlaying });
+              }
+            }
+            
             this.updateTracksList([...this.list_tracks], this.currentTrackIndex);
           }
           break;

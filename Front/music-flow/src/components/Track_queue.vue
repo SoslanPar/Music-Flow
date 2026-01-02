@@ -538,6 +538,7 @@ export default {
 .queue-scroll-wrapper {
   flex-grow: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 12px;
   padding-right: 6px;
 }
@@ -935,7 +936,7 @@ export default {
   color: rgba(255, 255, 255, 0.3);
 }
 
-@media (max-width: 768px) {
+@media (max-width: 768px) or (pointer: coarse) {
   .queue-scroll-wrapper {
     padding: 10px;
   }
@@ -982,7 +983,7 @@ export default {
 }
 
 /* Hide delete background on desktop */
-@media (min-width: 769px) {
+@media (min-width: 769px) and (pointer: cursor) {
   .delete-bg {
     display: none;
   }

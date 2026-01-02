@@ -121,6 +121,20 @@ class UserServices:
                     await session.commit()
             return user
     
+    async def remove_room(self, room_id: str, user_id: str):
+        """Удалить комнату из списка пользователя"""
+        async with self.db.session_factory() as session:
+            result = await session.execute(select(Users).where(Users.id == user_id))
+            user = result.scalar_one_or_none()
+            if user:
+                rooms = list(user.rooms_list) if user.rooms_list else []
+                if room_id in rooms:
+                    rooms.remove(room_id)
+                    user.rooms_list = rooms
+                    await session.commit()
+                    return True
+            return False
+    
     async def get_user_rooms(self, user_id: str) -> list:
         """Получить список комнат пользователя"""
         async with self.db.session_factory() as session:

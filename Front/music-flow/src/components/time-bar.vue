@@ -31,16 +31,27 @@ const props = defineProps({
   duration: { type: Number, required: true },
 });
 
-const emit = defineEmits(['seek']);
+const emit = defineEmits(['seek', 'seek-end']);
 const progressContainer = ref(null);
+
+// Локальное обновление позиции во время перетаскивания
+const onSeekDrag = (percent) => {
+  if (!isFinite(props.duration) || props.duration === 0) return;
+  const newTime = (percent / 100) * props.duration;
+  emit('seek', newTime);
+};
+
+// Финальная отправка на сервер когда пользователь отпустил ползунок
+const onSeekEnd = (percent) => {
+  if (!isFinite(props.duration) || props.duration === 0) return;
+  const newTime = (percent / 100) * props.duration;
+  emit('seek-end', newTime);
+};
 
 const { isDragging, dragPercent, startDrag } = useProgressDrag(
   progressContainer,
-  (percent) => {
-    if (!isFinite(props.duration) || props.duration === 0) return;
-    const newTime = (percent / 100) * props.duration;
-    emit('seek', newTime);
-  },
+  onSeekDrag,
+  onSeekEnd,
   true // with touch support
 );
 

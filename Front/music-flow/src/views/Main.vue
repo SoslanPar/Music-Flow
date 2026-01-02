@@ -17,7 +17,7 @@
           </svg>
         </button>
         
-        <Logo class="header-logo-full" />
+        <Logo v-if="!connected" class="header-logo-full" />
         
         <!-- Dropdown с комнатами на десктопе -->
         <div v-if="showRoomsDropdown" class="rooms-dropdown">
@@ -122,6 +122,24 @@
             </li>
           </ul>
         </div>
+        
+        <!-- Блок копирования ID комнаты -->
+        <div class="sidebar-section copy-id-section">
+          <button 
+            class="copy-room-id-btn" 
+            @click="copyRoomId"
+            :class="{ 'copied': justCopied }"
+          >
+            <svg v-if="!justCopied" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
+            </svg>
+            <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+            </svg>
+            <span>{{ justCopied ? 'ID скопирован!' : 'Скопировать ID комнаты' }}</span>
+          </button>
+        </div>
+        
       <button v-if="connected" class="leave-room-btn desktop-only" @click="leaveRoom">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
           <path d="M10.09 15.59L11.5 17l5-5-5-5-1.41 1.41L12.67 11H3v2h9.67l-2.58 2.59zM19 3H5c-1.11 0-2 .9-2 2v4h2V5h14v14H5v-4H3v4c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/>
@@ -179,18 +197,10 @@
                 v-for="room in rooms" 
                 :key="room.id" 
                 class="sidebar-item room-item"
-                :class="{ 'selected': selectedRoom === room.id }"
-                draggable="true"
-                @dragstart="onRoomDragStart($event, room)"
-                @dragover.prevent
-                @drop="onRoomDrop($event, room)"
-                @click="selectRoom(room)"
+                :class="{ 'active': roomId === room.id }"
+                @click="joinRoom(room.id)"
+                @contextmenu.prevent="openRoomMenu($event, room)"
               >
-                <div class="drag-handle">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M11 18c0 1.1-.9 2-2 2s-2-.9-2-2 .9-2 2-2 2 .9 2 2zm-2-8c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0-6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm6 4c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/>
-                  </svg>
-                </div>
                 <div class="item-avatar room-avatar">
                   {{ room.name.charAt(0).toUpperCase() }}
                 </div>
@@ -198,18 +208,44 @@
                 <div class="room-meta" v-if="room.participants_count > 0">
                   <span class="participants-count">{{ room.participants_count }}</span>
                 </div>
+                <span v-if="roomId === room.id" class="active-badge">Сейчас</span>
+                <!-- Три точки для мобильных -->
                 <button 
-                  v-if="selectedRoom === room.id" 
-                  class="join-btn" 
-                  @click.stop="joinRoom(room.id)"
+                  class="room-menu-btn mobile-only" 
+                  @click.stop="openRoomMenu($event, room)"
                 >
-                  Войти
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/>
+                  </svg>
                 </button>
               </li>
               <li v-if="rooms.length === 0 && !loadingRooms" class="empty-item">
                 У вас пока нет комнат
               </li>
             </ul>
+            
+            <!-- Контекстное меню для комнаты -->
+            <Teleport to="body">
+              <div 
+                v-if="roomMenuVisible" 
+                class="room-context-menu"
+                :style="{ top: roomMenuY + 'px', left: roomMenuX + 'px' }"
+                @click.stop
+              >
+                <button class="context-menu-item" @click="copyRoomIdFromMenu">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
+                  </svg>
+                  <span>Скопировать ID</span>
+                </button>
+                <button class="context-menu-item danger" @click="removeRoomFromMenu">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+                  </svg>
+                  <span>Удалить комнату</span>
+                </button>
+              </div>
+            </Teleport>
             
             <!-- Создание комнаты -->
             <div v-if="showCreateRoom" class="create-room-form">
@@ -254,6 +290,7 @@
         <div class="center-column">
           <div class="track-queue-wrapper">
             <TrackQueue 
+              :key="roomId"
               :tracks="tracks" 
               :currentTrackIndex="currentTrackIndex"
               :isPlaying="isPlayerPlaying"
@@ -272,6 +309,7 @@
       <!-- Скрытый AudioPlayer для управления воспроизведением -->
       <AudioPlayer
         v-if="connected"
+        :key="roomId"
         ref="audioPlayer"
         :roomId="roomId"
         class="hidden-player"
@@ -381,7 +419,13 @@ export default {
       showDropdownCreateForm: false,
       newRoomNameDropdown: '',
       loadingRooms: false,
-      draggedRoom: null,
+      // Room context menu
+      roomMenuVisible: false,
+      roomMenuX: 0,
+      roomMenuY: 0,
+      selectedMenuRoom: null,
+      // Copy ID state
+      justCopied: false,
       // Player state
       playerCurrentTime: 0,
       playerDuration: 0,
@@ -396,6 +440,9 @@ export default {
   computed: {
     currentTrack() {
       return this.tracks[this.currentTrackIndex] || null;
+    },
+    copyTooltip() {
+      return this.justCopied ? 'Скопировано!' : 'Скопировать ID комнаты';
     }
   },
 
@@ -408,10 +455,12 @@ export default {
     
     // Закрытие меню при клике вне
     document.addEventListener('click', this.closeMenuOnOutsideClick);
+    document.addEventListener('click', this.closeRoomMenu);
   },
   
   beforeUnmount() {
     document.removeEventListener('click', this.closeMenuOnOutsideClick);
+    document.removeEventListener('click', this.closeRoomMenu);
   },
   
   watch: {
@@ -451,16 +500,19 @@ export default {
       
       try {
         const result = await roomsApi.createRoom(name);
-        if (Array.isArray(result) && result.length > 0) {
-          const newRoom = result[result.length - 1];
-          this.rooms.push({ id: newRoom.id, name: name, participants_count: 1 });
+        
+        if (result && result.room) {
+          const newRoom = result.room;
+          const newRoomId = String(newRoom.id);
+          this.rooms.push({ id: newRoomId, name: newRoom.name || name, participants_count: 1 });
           this.newRoomNameDropdown = '';
           this.showDropdownCreateForm = false;
           this.showRoomsDropdown = false;
-          this.joinRoom(newRoom.id);
+          
+          await this.joinRoom(newRoomId);
         }
       } catch (error) {
-        console.error('Error creating room:', error);
+        // Error creating room
       }
     },
     
@@ -477,16 +529,39 @@ export default {
       }
     },
     
-    selectRoom(room) {
-      this.selectedRoom = room.id;
-    },
-    
-    joinRoom(roomId) {
+    async joinRoom(roomId) {
+      // Если уже в этой комнате - ничего не делаем
+      if (this.roomId === roomId && this.connected) {
+        return;
+      }
+      
+      // Сначала отключаемся от старой комнаты (если была)
+      const wasConnected = this.connected;
+      if (wasConnected) {
+        this.roomId = null;
+        this.connected = false;
+        
+        // Ждём чтобы Vue размонтировал AudioPlayer
+        await this.$nextTick();
+        await new Promise(r => setTimeout(r, 150));
+      }
+      
+      // Очищаем данные от предыдущей комнаты
+      this.tracks = [];
+      this.currentTrackIndex = 0;
+      this.participants = [];
+      
+      // Устанавливаем новую комнату
       this.roomId = roomId;
       const room = this.rooms.find(r => r.id === roomId);
       this.currentRoomName = room ? room.name : `Room ${roomId}`;
+      
+      // Ждём nextTick перед включением connected
+      await this.$nextTick();
+      
       this.connected = true;
       this.showRoomsDropdown = false;
+      
       // Показать загрузку очереди
       this.isQueueLoading = true;
       setTimeout(() => {
@@ -494,26 +569,132 @@ export default {
       }, 1500);
     },
     
-    switchRoom(room) {
+    async switchRoom(room) {
       if (room.id === this.roomId) {
         this.showRoomsDropdown = false;
         return;
       }
-      // Сначала выходим из текущей комнаты
-      this.leaveRoom();
-      // Затем входим в новую
-      this.$nextTick(() => {
-        this.joinRoom(room.id);
-      });
+      await this.joinRoom(room.id);
     },
     
-    quickJoin() {
+    async quickJoin() {
       const id = this.roomIdInput.trim();
-      if (id) {
-        this.roomId = id;
-        this.currentRoomName = `Room ${id}`;
-        this.connected = true;
+      if (!id) return;
+      
+      try {
+        // Присоединяемся к комнате и добавляем её в БД
+        const result = await roomsApi.joinRoom(id);
+        
+        // Добавляем комнату в локальный список если её там нет
+        if (!this.rooms.find(r => r.id === id)) {
+          this.rooms.push({ 
+            id: id, 
+            name: result.room_name || `Room ${id}`, 
+            participants_count: 1 
+          });
+        }
+        
         this.roomIdInput = '';
+        await this.joinRoom(id);
+      } catch (error) {
+        console.error('Error joining room:', error);
+        alert('Комната не найдена или ошибка подключения');
+      }
+    },
+    
+    async removeRoom(roomId) {
+      try {
+        await roomsApi.removeRoomFromList(roomId);
+        
+        // Удаляем комнату из локального списка
+        this.rooms = this.rooms.filter(r => r.id !== roomId);
+        
+        // Если удаляем комнату, в которой мы находимся - выходим
+        if (this.roomId === roomId) {
+          this.leaveRoom();
+        }
+      } catch (error) {
+        console.error('Error removing room:', error);
+        alert('Ошибка при удалении комнаты');
+      }
+    },
+    
+    // Контекстное меню для комнат
+    openRoomMenu(event, room) {
+      this.selectedMenuRoom = room;
+      this.roomMenuX = event.clientX;
+      this.roomMenuY = event.clientY;
+      
+      // Проверяем, не выходит ли меню за пределы экрана
+      const menuWidth = 180;
+      const menuHeight = 90;
+      if (this.roomMenuX + menuWidth > window.innerWidth) {
+        this.roomMenuX = window.innerWidth - menuWidth - 10;
+      }
+      if (this.roomMenuY + menuHeight > window.innerHeight) {
+        this.roomMenuY = window.innerHeight - menuHeight - 10;
+      }
+      
+      this.roomMenuVisible = true;
+    },
+    
+    closeRoomMenu() {
+      this.roomMenuVisible = false;
+      this.selectedMenuRoom = null;
+    },
+    
+    async copyRoomIdFromMenu() {
+      if (!this.selectedMenuRoom) return;
+      
+      try {
+        await navigator.clipboard.writeText(this.selectedMenuRoom.id);
+        this.justCopied = true;
+        setTimeout(() => {
+          this.justCopied = false;
+        }, 2000);
+      } catch (error) {
+        const textArea = document.createElement('textarea');
+        textArea.value = this.selectedMenuRoom.id;
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+      }
+      
+      this.closeRoomMenu();
+    },
+    
+    async removeRoomFromMenu() {
+      if (!this.selectedMenuRoom) return;
+      await this.removeRoom(this.selectedMenuRoom.id);
+      this.closeRoomMenu();
+    },
+    
+    async copyRoomId() {
+      if (!this.roomId) return;
+      
+      try {
+        await navigator.clipboard.writeText(this.roomId);
+        this.justCopied = true;
+        
+        // Сбрасываем состояние через 2 секунды
+        setTimeout(() => {
+          this.justCopied = false;
+        }, 2000);
+      } catch (error) {
+        console.error('Error copying room ID:', error);
+        // Fallback для старых браузеров
+        const textArea = document.createElement('textarea');
+        textArea.value = this.roomId;
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+        
+        this.justCopied = true;
+        setTimeout(() => {
+          this.justCopied = false;
+        }, 2000);
       }
     },
     
@@ -523,15 +704,18 @@ export default {
       
       try {
         const result = await roomsApi.createRoom(name);
-        if (Array.isArray(result) && result.length > 0) {
-          const newRoom = result[result.length - 1];
-          this.rooms.push({ id: newRoom.id, name: name, participants_count: 1 });
+        
+        if (result && result.room) {
+          const newRoom = result.room;
+          const newRoomId = String(newRoom.id);
+          this.rooms.push({ id: newRoomId, name: newRoom.name || name, participants_count: 1 });
           this.newRoomName = '';
           this.showCreateRoom = false;
-          this.joinRoom(newRoom.id);
+          
+          await this.joinRoom(newRoomId);
         }
       } catch (error) {
-        console.error('Error creating room:', error);
+        // Error creating room
       }
     },
     
@@ -540,13 +724,29 @@ export default {
     },
     
     leaveRoom() {
-      this.sidebarOpen = false; // Закрываем sidebar сначала
-      this.connected = false;
-      this.roomId = null;
-      this.currentRoomName = '';
+      // Закрываем sidebar
+      this.sidebarOpen = false;
+      
+      // Сбрасываем состояние плеера
+      this.isPlayerPlaying = false;
+      this.playerCurrentTime = 0;
+      this.playerDuration = 0;
+      this.isPlayerLoading = false;
+      this.isQueueLoading = false;
+      
+      // Очищаем данные комнаты
       this.tracks = [];
       this.participants = [];
       this.currentTrackIndex = 0;
+      
+      // Сбрасываем идентификаторы комнаты (это размонтирует AudioPlayer)
+      this.roomId = null;
+      this.currentRoomName = '';
+      this.connected = false;
+      
+      // Закрываем dropdown если открыт
+      this.showRoomsDropdown = false;
+      this.showQueueSidebar = false;
     },
     
     handleLogout() {
@@ -658,26 +858,6 @@ export default {
       this.playerDuration = state.duration || 0;
       this.isPlayerPlaying = state.isPlaying || false;
       this.isPlayerLoading = state.isLoading || false;
-    },
-    
-    // Drag and drop для комнат
-    onRoomDragStart(event, room) {
-      this.draggedRoom = room;
-      event.dataTransfer.effectAllowed = 'move';
-    },
-    
-    onRoomDrop(event, targetRoom) {
-      if (!this.draggedRoom || this.draggedRoom.id === targetRoom.id) return;
-      
-      const oldIndex = this.rooms.findIndex(r => r.id === this.draggedRoom.id);
-      const newIndex = this.rooms.findIndex(r => r.id === targetRoom.id);
-      
-      if (oldIndex !== -1 && newIndex !== -1) {
-        const [removed] = this.rooms.splice(oldIndex, 1);
-        this.rooms.splice(newIndex, 0, removed);
-      }
-      
-      this.draggedRoom = null;
     },
     
     // Удаление трека из очереди
@@ -997,6 +1177,8 @@ export default {
   flex: 1;
   display: flex;
   justify-content: center;
+  align-items: center;
+  gap: 8px;
 }
 
 .room-title {
@@ -1004,10 +1186,36 @@ export default {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  width: 100px;
+  width: 55%;
   font-weight: 500;
   text-align: center;
   color: white;
+}
+
+.copy-id-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: rgba(208, 188, 255, 0.1);
+  border: 1px solid rgba(208, 188, 255, 0.2);
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.copy-id-btn:hover {
+  background: rgba(208, 188, 255, 0.2);
+  color: white;
+  border-color: rgba(208, 188, 255, 0.4);
+}
+
+.copy-id-btn.copied {
+  background: rgba(34, 197, 94, 0.2);
+  border-color: rgba(34, 197, 94, 0.4);
+  color: #22c55e;
 }
 
 .header-right {
@@ -1118,9 +1326,10 @@ export default {
     z-index: 140;
     animation: fadeIn 0.2s ease;
   }
-
-  .header-logo-full {
-    display: none;
+  
+  /* На мобильных показываем кнопку три точки */
+  .room-menu-btn {
+    display: flex;
   }
   
   @keyframes fadeIn {
@@ -1147,7 +1356,7 @@ export default {
   overflow: hidden;
   transition: transform 0.3s ease, width 0.3s ease;
   height: 100%;
-  padding-bottom: 50px; /* Место для плеера */
+  padding-bottom: 65px; /* Место для плеера */
 }
 
 .sidebar-section {
@@ -1272,16 +1481,6 @@ export default {
   border: 1px solid rgba(208, 188, 255, 0.3);
 }
 
-.drag-handle {
-  cursor: grab;
-  color: rgba(255, 255, 255, 0.3);
-  padding: 2px;
-}
-
-.drag-handle:hover {
-  color: rgba(255, 255, 255, 0.6);
-}
-
 .item-avatar {
   width: 32px;
   height: 32px;
@@ -1349,6 +1548,143 @@ export default {
 
 .join-btn:hover {
   opacity: 0.9;
+}
+
+/* Active room badge */
+.active-badge {
+  background: linear-gradient(135deg, #00d9e7 0%, #8b5cf6 100%);
+  color: white;
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  margin-left: auto;
+  font-weight: 500;
+}
+
+/* Room menu button (three dots) for mobile */
+.room-menu-btn {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.room-menu-btn:hover {
+  background: rgba(208, 188, 255, 0.2);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* Room context menu */
+.room-context-menu {
+  backdrop-filter: blur(2px);
+  position: fixed;
+  z-index: 10000;
+  background: rgba(35, 25, 55, 0.2);
+  border: 1px solid rgba(208, 188, 255, 0.3);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  padding: 6px;
+  min-width: 170px;
+  animation: menuFadeIn 0.15s ease;
+}
+
+@keyframes menuFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 14px;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 13px;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: all 0.15s ease;
+  text-align: left;
+}
+
+.context-menu-item:hover {
+  background: rgba(208, 188, 255, 0.15);
+}
+
+.context-menu-item.danger {
+  color: #ff5252;
+}
+
+.context-menu-item.danger:hover {
+  background: rgba(255, 82, 82, 0.15);
+}
+
+.context-menu-item svg {
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+/* Room item active state */
+.room-item.active {
+  background: rgba(0, 217, 231, 0.1);
+  border: 1px solid rgba(0, 217, 231, 0.3);
+}
+
+/* Copy Room ID Button */
+.copy-id-section {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(208, 188, 255, 0.1);
+}
+
+.copy-room-id-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: rgba(208, 188, 255, 0.1);
+  border: 1px solid rgba(208, 188, 255, 0.2);
+  border-radius: 10px;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.copy-room-id-btn:hover {
+  background: rgba(208, 188, 255, 0.2);
+  border-color: rgba(208, 188, 255, 0.4);
+}
+
+.copy-room-id-btn.copied {
+  background: rgba(76, 175, 80, 0.2);
+  border-color: rgba(76, 175, 80, 0.4);
+  color: #4caf50;
+}
+
+.copy-room-id-btn svg {
+  flex-shrink: 0;
 }
 
 .empty-item {
@@ -1489,14 +1825,14 @@ export default {
 }
 
 .rooms-sidebar {
-  width: 260px;
-  min-width: 260px;
+  width: 320px;
+  min-width: 320px;
   background: rgba(23, 18, 34, 0.6);
   border-right: 1px solid rgba(208, 188, 255, 0.1);
   display: flex;
   flex-direction: column;
   overflow-y: auto;
-  padding: 12px;
+  padding: 16px;
 }
 
 .rooms-main-area {
@@ -1581,13 +1917,13 @@ export default {
 /* Leave Button (desktop only) */
 .leave-room-btn {
   position: fixed;
-  bottom: 110px; /* Above desktop player */
+  bottom: 100px; /* Above desktop player */
   /* left: 16px; */
   align-self: center;
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 16px;
+  padding: 12px 16px;
   background: rgba(255, 100, 100, 0.1);
   border: 1px solid rgba(255, 100, 100, 0.3);
   border-radius: 10px;
@@ -1607,6 +1943,17 @@ export default {
 @media (max-width: 1100px) {
   .center-column {
     min-height: 200px;
+  }
+}
+
+@media (pointer: coarse) {
+    .room-view {
+    flex: 1;
+    display: flex;
+    gap: 16px;
+    padding: 16px;
+    padding-bottom: 80px; /* Место для десктопного плеера */
+    overflow: hidden;
   }
 }
 
@@ -1713,6 +2060,14 @@ export default {
   /* Кнопка выхода скрыта - есть в sidebar */
   .leave-room-btn {
     display: none !important;
+  }
+
+  .search-container {
+    padding: 5px;
+  }
+
+  .sidebar {
+    padding-bottom: 80px;
   }
 }
 

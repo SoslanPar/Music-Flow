@@ -79,6 +79,24 @@ export const roomsApi = {
   },
 
   /**
+   * Присоединиться к комнате по ID (добавляет в список комнат пользователя)
+   */
+  async joinRoom(roomId) {
+    return fetchWithError(`${API_BASE}/rooms/${roomId}/join`, {
+      method: 'POST',
+    });
+  },
+
+  /**
+   * Удалить комнату из списка пользователя (не удаляет саму комнату)
+   */
+  async removeRoomFromList(roomId) {
+    return fetchWithError(`${API_BASE}/rooms/${roomId}/leave`, {
+      method: 'DELETE',
+    });
+  },
+
+  /**
    * Получить очередь треков комнаты
    */
   async getQueue(roomId, trackId = '') {
@@ -119,6 +137,34 @@ export const tracksApi = {
    */
   getStreamUrl(url, userId) {
     return `${API_BASE}/tracks/stream?url=${encodeURIComponent(url)}&user_id=${encodeURIComponent(userId)}`;
+  },
+
+  /**
+   * Поиск треков по названию
+   */
+  async searchTracks(query, limit = 10) {
+    return fetchWithError(
+      `${API_BASE}/tracks/search?query=${encodeURIComponent(query)}&limit=${limit}`
+    );
+  },
+
+  /**
+   * Получить треки из плейлиста/альбома
+   */
+  async getPlaylistTracks(url, limit = 50) {
+    return fetchWithError(
+      `${API_BASE}/tracks/playlist?url=${encodeURIComponent(url)}&limit=${limit}`
+    );
+  },
+
+  /**
+   * Получить информацию о нескольких треках
+   */
+  async getBatchTrackInfo(trackUrls) {
+    return fetchWithError(`${API_BASE}/tracks/batch_info`, {
+      method: 'POST',
+      body: JSON.stringify(trackUrls),
+    });
   },
 };
 

@@ -77,18 +77,29 @@ class WebSocketRoutes:
     async def _sync_time_async(self, room_id: str, exclude_user: str):
         """Асинхронная синхронизация времени (не блокирует подключение)"""
         try:
+            # Проверяем есть ли другие участники
+            other_users = [
+                uid for uid in self.manager.active_connections.get(room_id, {}).keys()
+                if uid != exclude_user
+            ]
+            
+            if not other_users:
+                # Нет других участников - используем время из БД (уже установлено)
+                return
+            
             # Запрашиваем время у участников
             await self.manager.get_current_playback_time(room_id, exclude_user)
             
             # Ждём короткое время для ответов
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(0.5)
             
-            # Обновляем время если получили ответы
+            # Используем время от участников если получили ответы
             if room_id in self.time_responses and self.time_responses[room_id]:
                 responses = list(self.time_responses[room_id].values())
                 if responses:
+                    # Берём среднее время от участников
                     avg_time = sum(responses) / len(responses)
-                    await self.manager.update_room_state(room_id, {"time_moment": avg_time})
+                    # Не записываем в БД - это только для синхронизации нового участника
                     self.time_responses[room_id].clear()
         except Exception as e:
             print(f"Time sync error: {e}")
@@ -205,13 +216,18 @@ class WebSocketRoutes:
             }, exclude_user=user_id)
 
         elif msg_type == "seek":
-            await self.manager.update_room_state(room_id, {
-                "time_moment": data.get("position", 0)
-            })
+            # Только broadcast другим пользователям без записи в БД
+            # БД обновляется только при входе/выходе пользователей
             await self.manager.broadcast(room_id, {
                 "type": "seek",
                 "position": data.get("position", 0)
             }, exclude_user=user_id)
+        
+        elif msg_type == "seek_commit":
+            # Финальное сохранение позиции в БД (когда пользователь отпустил ползунок)
+            await self.manager.update_room_state(room_id, {
+                "time_moment": data.get("position", 0)
+            })
 
         elif msg_type == "remove_track":
             # Удаление трека из очереди
@@ -219,20 +235,30 @@ class WebSocketRoutes:
             if track_index is not None:
                 room_state = await self.manager.get_room_state(room_id)
                 tracks = list(room_state.get("list_track", []))
+                current_index = room_state.get("index_track", 0)
                 
                 if 0 <= track_index < len(tracks):
+                    removed_current = track_index == current_index
                     tracks.pop(track_index)
                     
-                    # Корректируем текущий индекс если нужно
-                    current_index = room_state.get("index_track", 0)
-                    if track_index < current_index:
-                        current_index = max(0, current_index - 1)
-                    elif track_index == current_index and current_index >= len(tracks):
-                        current_index = max(0, len(tracks) - 1)
+                    # Корректируем текущий индекс
+                    new_index = current_index
+                    if len(tracks) == 0:
+                        new_index = 0
+                    elif track_index < current_index:
+                        # Удалили трек ДО текущего - сдвигаем индекс назад
+                        new_index = current_index - 1
+                    elif track_index == current_index:
+                        # Удалили текущий трек
+                        if current_index >= len(tracks):
+                            # Был последний - переходим на предыдущий
+                            new_index = max(0, len(tracks) - 1)
+                        # Иначе индекс остаётся тот же (следующий трек сдвинется на это место)
+                    # Если удалили трек ПОСЛЕ текущего - индекс не меняется
                     
                     await self.manager.update_room_state(room_id, {
                         "list_track": tracks,
-                        "index_track": current_index
+                        "index_track": new_index
                     })
                     
                     # Оповещаем всех участников
@@ -240,7 +266,8 @@ class WebSocketRoutes:
                         "type": "track_removed",
                         "removed_index": track_index,
                         "tracks": tracks,
-                        "index": current_index
+                        "index": new_index,
+                        "removed_current": removed_current
                     })
 
         elif msg_type == "change_track":

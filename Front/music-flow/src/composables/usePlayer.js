@@ -18,10 +18,11 @@ export function formatTime(seconds) {
 /**
  * Hook для управления перетаскиванием прогресс-бара
  * @param {Ref<HTMLElement>} containerRef - ref элемента контейнера
- * @param {Function} onSeek - callback с процентом (0-100)
+ * @param {Function} onSeek - callback с процентом (0-100) во время перетаскивания
+ * @param {Function} onSeekEnd - callback с финальным процентом когда пользователь отпустил
  * @param {boolean} withTouch - поддержка touch событий
  */
-export function useProgressDrag(containerRef, onSeek, withTouch = false) {
+export function useProgressDrag(containerRef, onSeek, onSeekEnd = null, withTouch = false) {
   const isDragging = ref(false);
   const dragPercent = ref(0);
   
@@ -42,6 +43,7 @@ export function useProgressDrag(containerRef, onSeek, withTouch = false) {
     e.preventDefault();
     isDragging.value = true;
     dragPercent.value = getPercentFromEvent(e);
+    // Во время перетаскивания - только локальное обновление позиции
     onSeek(dragPercent.value);
     
     handleDrag = (e) => {
@@ -54,7 +56,13 @@ export function useProgressDrag(containerRef, onSeek, withTouch = false) {
     };
     
     stopDrag = () => {
-      isDragging.value = false;
+      if (isDragging.value) {
+        isDragging.value = false;
+        // При отпускании - отправляем финальную позицию на сервер
+        if (onSeekEnd) {
+          onSeekEnd(dragPercent.value);
+        }
+      }
       cleanup();
     };
     
